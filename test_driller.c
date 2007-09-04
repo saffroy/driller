@@ -16,6 +16,11 @@ void f(int n) {
 		f(n-1);
 }
 
+void map_invalidate(struct map_rec *map) {
+	printf("map invalidate: Ox%lx-0x%lx\n",
+	       map->start, map->end);
+}
+
 int main(int argc, char**argv) {
 	int i;
 	void **a;
@@ -23,6 +28,7 @@ int main(int argc, char**argv) {
 
 #ifndef NODRILL
 	driller_init();
+	driller_register_map_invalidate_cb(map_invalidate);
 #endif
 
 	/* test heap */
