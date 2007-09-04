@@ -1,0 +1,10 @@
+syntax: glob
+*.orig
+*.rej
+*~
+*.o
+tests/*.err
+.gdb_history
+
+syntax: regexp
+.*\#.*\#$

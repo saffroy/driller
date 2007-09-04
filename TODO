@@ -1,0 +1,14 @@
+- define driller API
+ * lookup map/fd for an address range
+ * (un)register map and fd revocation callback
+ * install mapping of a remote process (could use mmap?)
+- fdproxy
+ * let fdproxy map fd to key, add key_t = {pid, fd}
+- integrate with mmpi
+ * add message types: simple, fragmented, driller
+ * get map for address (from driller)
+ * send/recv (fd key, offset) to/from sibling
+ * send (fd, fd key) to fdproxy
+ * recv fd from fdproxy
+ * send/recv fd/map revoke scheme (add callback to driller)
+ * must define fd and map life cycle

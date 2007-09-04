@@ -1,0 +1,113 @@
+The Driller lib
+
+Goal:
+ * enable a group of processes to directly access memory of one another
+
+Approach:
+ * each process rebuilds its own address space with memory mapped files,
+   and shares its file descriptors with others using unix sockets, so
+   other processes can remap the memory regions in their own address space
+
+Details:
+ * rebuild
+   a process can parse its /proc/self/maps to retrieve offsets and size
+   of its data segments (ie. .data, stack, heap), then each segment
+   can be copied to a temp (unlinked) file, which is then remapped over
+   the original segment (which is thus discarded)
+ * stack
+   a temporary stack must be used while establishing the new stack, this
+   can be done with swapcontext
+   need to handle stack growth! cannot use mmap flags, so need to use
+   segv handler (in alt stack, and up to stack limit)
+   can handle limit (getrlimit)
+ * data segments
+   no global data should be used after the segments are copied and before
+   the copies replace the original
+ * heap
+   no memory allocation while establishing the new heap, no access to
+   alloc'ed memory either
+   need to overload malloc! because libc malloc uses mmap _internally_
+    (ie. overloading mmap does NOT work for libc malloc)
+    simply using any external malloc that uses mmap should be enough
+    candidates: hoard (big C++ thing), dlmalloc (simpler, public domain)
+    to be able to perform allocations while in mmap/brk called by malloc,
+    use a separate memory pool (dlmalloc rewlz)
+   better to overload brk:
+    heap can no longer grow, malloc uses mmap
+    thus overloading brk saves the creation of many small mmaps
+   need to overload mmap:
+    anonymous memory becomes shared temp file
+    shared files remain shared
+    private is copied (memory consuming, just like .data)
+    ATM only anonymous maps handled; may well stay this way
+   need to overload munmap:
+    unmap, trim/delete affected maps, discard fd in proxy and in peers
+   need to overload mremap:
+    if identified map: remap, notify new map in peers?
+    if does not fit a map, crash
+   mprotect?
+    XXX TBD
+ * security
+   credentials over unix sockets can be used (linux specific)
+ * remote access
+   pointer from one process becomes (pid, segment, offset) triple to
+   identify the remapped segment in another process
+ * lazy remapping
+   a segment could be rebuilt only when a remote process needs access
+   it could save memory, typically for data sections (and other private
+   maps, which can be rare)
+ * rodata
+   non-writable segments need copying too (they can contain .rodata),
+   unless the backing files can be found and mapped read-only
+ * fully static linking?
+   should probably work, small differences:
+   init must be explicitely called
+   overloading will probably depend on link order
+   err... no: rtld_next can't be used!
+ * threads
+   concurrent access
+   stacks: multiple stacks, maybe special mmap flags
+ * number of fds
+   there can be many, if needed they could be limited:
+   - heap can be reimplemented by overloading brk/sbrk
+   - a single fd for a fixed size large chunk (eg. 1MB) is easily managed with
+     a bitmap, and when necessary, unused space can be reclaimed by copying
+     then remapping used areas at the end of the file; this means these areas
+     must no longer be used by siblings... or maybe it's a silly idea
+ * fork
+   may work by overloading it:
+   switch to temp stack, do fork, and child resets driller maps
+
+Pros
+ * can use regular debuggers
+ * produces regular core dumps
+ * small code base, uses mostly well-known system interfaces
+ * easily portable to other architectures
+   (a bit more tricky for IA64 because of the two stacks)
+ * cleanup of shared mem segments handled by the kernel
+
+Cons
+ * default tmpfs size is half of the memory, it may need to be increased
+ * requires external allocator so mmap can be overloaded
+ * dlmallopt is not glibc-compatible (though rather close)
+ * fork does not work (yet?)
+ * increased memory consumption: segments are completely rewritten, no
+   sharing of unmodified datas (how much? not sure if it's significant)
+ * not thread safe (yet)
+ * stack growth costs signal + 2 syscalls (mmap + getrlimit)
+   mitigated by stack growth granularity
+   could save call to getrlimit
+ * not sure if it breaks some libs (qx, ib), may be worked around (blacklist)
+ * some linuxisms limit OS portability:
+   credentials over unix sockets (optional)
+   abstract namespace for unix sockets (easier cleanup)
+   parse /proc/self/maps
+ * some housekeeping needed to keep track of new segments; need to check
+   if a thread is needed to handle unix socket comms while process is busy
+ * could use many file descriptors when malloc calls mmap, unless we
+   use a single fd for most maps (ie. those starting at TASK_UNMAPPED_BASE)
+   this will require an allocator
+   see also notes above
+ * brk can no longer grow the heap
+   malloc uses mmap areas instead; can be improved by overloading brk
+   brk overloaded, so it's ok; costs 2 syscalls instead of one
