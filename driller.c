@@ -78,11 +78,11 @@ extern void *(*__memalign_hook)(size_t align, size_t bytes, const void *caller);
 
 /******************/
 
-static inline void *driller_malloc(size_t bytes) {
+void *driller_malloc(size_t bytes) {
 	return mspace_malloc(driller_mspace, bytes);
 }
 
-static inline void driller_free(void *mem) {
+void driller_free(void *mem) {
 	mspace_free(driller_mspace, mem);
 }
 
@@ -171,6 +171,7 @@ static void map_record(off_t start, off_t end, int prot, off_t offset,
 
 	map = malloc(sizeof(*map));
 	assert(map != NULL);
+	memset(map, 0, sizeof(*map));
 
 	map->start = start;
 	map->end = end;
@@ -228,8 +229,9 @@ static void map_parse(void)
 		    lineno, start, end, prot_str, offset, maj, min, ino, p);
 		prot = ((prot_str[0] == 'r') ? PROT_READ : 0)
 			| ((prot_str[1] == 'w') ? PROT_WRITE : 0)
-			| ((prot_str[2] == 'x') ? PROT_EXEC : 0) ;
-		map_record(start, end, prot, offset, p, -1);
+			| ((prot_str[2] == 'x') ? PROT_EXEC : 0);
+		if(prot_str[3] == 'p') /* private mapping */
+			map_record(start, end, prot, offset, p, -1);
 		if(*line == '\0')
 			return;
 	}
@@ -470,6 +472,11 @@ static void map_invalidate_range(off_t start, off_t end) {
 			/* map has disappeared completely */
 
 			assert(tdelete(map, &map_root, map_cmp) != NULL);
+
+			/* make sure memory is released *now* */
+			if(ftruncate(map->fd, 0) != 0)
+				perr("ftruncate");
+
 			close(map->fd);
 			free(map->path);
 			free(map);
@@ -689,10 +696,8 @@ static void * get_sym(const char *symbol) {
 	return sym;
 }
 
-#if 0 /* for separate shared obj */
+/* must be called before any call to one of the overloaded syms */
 static void driller_init_syms(void) __attribute__((constructor));
-#endif
-
 static void driller_init_syms(void) {
 	/* locate overloaded functions */
 	old_mmap = get_sym("mmap");
@@ -723,7 +728,6 @@ map_rebuild_action(const void *nodep, const VISIT which, const int depth) {
 void driller_init(void) {
 
 	page_size = sysconf(_SC_PAGESIZE);
-	driller_init_syms();
 
 	/* force first call to brk, so heap becomes visible */
 	free(malloc(1));
@@ -736,12 +740,6 @@ void driller_init(void) {
 
 	/* replace own mappings */
 	twalk(map_root, map_rebuild_action);
-
-	/* join siblings */
-	/* publish new mappings */
-	/* gather siblings' mappings */
-
-	dbg("init complete");
 
 	driller_malloc_restore();
 
@@ -763,3 +761,19 @@ struct map_rec *driller_lookup_map(void *start, size_t length) {
 	else
 		return *mptr;
 }
+
+void *driller_install_map(struct map_rec *map) {
+	void *rc;
+
+	rc = old_mmap(NULL, map->end - map->start, PROT_READ,
+		      MAP_SHARED, map->fd, map->offset);
+	if(rc == MAP_FAILED)
+		perr("mmap");
+	return rc;
+}
+
+void driller_remove_map(struct map_rec *map, void *p) {
+	if(old_munmap(p, map->end - map->start) != 0)
+		perr("munmap");
+}
+

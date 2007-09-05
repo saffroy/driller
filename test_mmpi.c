@@ -7,7 +7,7 @@
 #include "mmpi.h"
 #include "log.h"
 
-#define THRTEST_CHUNK_SIZE (1 << 24) /* 16 MB */
+#define THRTEST_CHUNK_SIZE (1 << 26) /* 64 MB */
 #define THRTEST_VOLUME (1 << 30) /* 1 GB */
 #define THRTEST_CHUNK_COUNT (THRTEST_VOLUME/THRTEST_CHUNK_SIZE)
 
@@ -127,15 +127,14 @@ int main(int argc, char**argv) {
 				assert(buf[0] == (char)i);
 				assert(buf[THRTEST_CHUNK_SIZE-1] == (char)i);
 			}
-
+		}
 		gettimeofday(&tv2, NULL);
 		delta = (tv2.tv_usec - tv1.tv_usec) / 1000000
 			+ (tv2.tv_sec - tv1.tv_sec);
-		printf("average send/recv throughput: %.2fMB/s\n",
-		       (float)THRTEST_VOLUME/(float)(1<<20)/(float)delta);
-		}
+		printf("average send/recv throughput: %.2f MB/s\n",
+		       (float)((nprocs-1) * THRTEST_VOLUME >> 20) / (float)delta);
 	}
-
+	free(buf);
 
 	mmpi_barrier();
 	printf("SUCCESS! rank %d exits\n", rank);

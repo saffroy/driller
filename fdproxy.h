@@ -16,5 +16,6 @@ static inline void fdproxy_set_key_id(struct fdkey *key, int id) {
 void fdproxy_init(int proxy_id, int do_fork);
 void fdproxy_client_send_fd(int fd, struct fdkey *key);
 int fdproxy_client_get_fd(struct fdkey *key);
+void fdproxy_client_invalidate_fd(struct fdkey *key);
 
 #endif /* FDPROXY_H */

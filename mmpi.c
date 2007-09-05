@@ -11,9 +11,10 @@
 #include <assert.h>
 
 #include "mmpi.h"
-#include "mmpi_internal.h"
 #include "log.h"
 #include "fdproxy.h"
+#include "driller.h"
+#include "mmpi_internal.h"
 
 
 static inline void nop(void) {
@@ -290,6 +291,38 @@ static void mmpi_init_shmem(void) {
 	}
 }
 
+void mmpi_send_driller_inval(int dest_rank,
+			     struct map_rec *map, struct fdkey *key) {
+	struct shmem *my = shmem + rank;
+	struct shmem *dest = shmem + dest_rank;
+	struct message *m;
+
+	m = msg_dequeue_head(&my->free_q);
+
+	m->m_type = MSG_DRILLER_INVAL;
+	memcpy(&m->m_drill.map, map, sizeof(*map));
+	memcpy(&m->m_drill.key, key, sizeof(*key));
+
+	msg_queue_lock(&dest->recv_q);
+	__msg_enqueue(&dest->recv_q, m);
+	msg_queue_unlock(&dest->recv_q);
+}
+
+void mmpi_map_invalidate_cb(struct map_rec *map) {
+	struct driller_udata *udata;
+	int i;
+
+	dbg("invalidate: Ox%lx-0x%lx\n", map->start, map->end);
+	udata = map->user_data;
+	if(udata == NULL)
+		return;
+	fdproxy_client_invalidate_fd(&udata->key);
+	for(i = 0; i < nprocs; i++)
+		if(udata->references[i])
+			;//xxx todo: revoke from siblings
+	driller_free(udata);
+}
+
 void mmpi_init(int jobid, int n, int r) {
 	nprocs = n;
 	rank = r;
@@ -301,10 +334,12 @@ void mmpi_init(int jobid, int n, int r) {
 		fdproxy_init(jobid, 0);
 
 	mmpi_init_shmem();
+	driller_init();
+	driller_register_map_invalidate_cb(mmpi_map_invalidate_cb);
 	mmpi_barrier();
 }
 
-void mmpi_send(int dest_rank, void *buf, size_t size) {
+static void mmpi_send_frags(int dest_rank, void *buf, size_t size) {
 	struct shmem *my = shmem + rank;
 	struct shmem *dest = shmem + dest_rank;
 	struct message *m;
@@ -318,7 +353,7 @@ void mmpi_send(int dest_rank, void *buf, size_t size) {
 		memcpy(m->m_payload, p, m->m_size);
 		p += m->m_size;
 		remainder -= m->m_size;
-		m->m_flags = remainder ? MSGFLAG_NONE : MSGFLAG_LAST_FRAG;
+		m->m_type = remainder ? MSG_FRAG : MSG_DATA;
 
 		msg_queue_lock(&dest->recv_q);
 		__msg_enqueue(&dest->recv_q, m);
@@ -326,21 +361,130 @@ void mmpi_send(int dest_rank, void *buf, size_t size) {
 	} while(remainder > 0);
 }
 
+static void mmpi_send_driller(int dest_rank, void *buf, size_t size) {
+	struct shmem *my = shmem + rank;
+	struct shmem *dest = shmem + dest_rank;
+	struct message *m;
+	struct map_rec *map;
+	struct fdkey *key;
+	struct driller_udata *udata;
+
+	map = driller_lookup_map(buf, size);
+	if(map == NULL) {
+		mmpi_send_frags(dest_rank, buf, size);
+		return;
+	}
+	assert(map->start <= (off_t)buf);
+	assert(map->end >= (off_t)buf + size);
+
+	/* send the fd to fdproxy if not already done */
+	if(map->user_data == NULL) {
+		udata = driller_malloc(sizeof(*udata) + nprocs);
+		assert(udata != NULL);
+		map->user_data = udata;
+		key = &udata->key;
+		fdproxy_client_send_fd(map->fd, key);
+	} else {
+		udata = map->user_data;
+		key = &udata->key;
+	}
+	/* mark dest_rank as user of this map */
+	udata->references[dest_rank] = 1;
+
+	m = msg_dequeue_head(&my->free_q);
+
+	m->m_type = MSG_DRILLER;
+	memcpy(&m->m_drill.map, map, sizeof(*map));
+	memcpy(&m->m_drill.key, key, sizeof(*key));
+	m->m_drill.offset = (off_t)buf - map->start;
+	m->m_drill.length = size;
+	m->m_size = sizeof(struct driller_payload);
+
+	/* want to be notified of recv completion */
+	my->driller_send_running = 1;
+
+	msg_queue_lock(&dest->recv_q);
+	__msg_enqueue(&dest->recv_q, m);
+	msg_queue_unlock(&dest->recv_q);
+
+	/* wait for recv completion */
+	while(my->driller_send_running)
+		nop();
+}
+
+void mmpi_send(int dest_rank, void *buf, size_t size) {
+	if(size >= MSG_SIZE_THRESHOLD)
+		mmpi_send_driller(dest_rank, buf, size);
+	else
+		mmpi_send_frags(dest_rank, buf, size);
+}
+
+void mmpi_recv_driller(int src_rank, void *buf, size_t *size,
+		       struct message *m) {
+	struct shmem *src = shmem + src_rank;
+	struct map_rec *map;
+	struct fdkey *key;
+	char *map_base;
+
+	map = &m->m_drill.map;
+	key = &m->m_drill.key;
+	//xxx todo: cache map+fd locally
+	map->fd = fdproxy_client_get_fd(key);
+	assert(map->fd >= 0);
+	map_base = driller_install_map(map);
+	memcpy(buf, map_base + m->m_drill.offset, m->m_drill.length);
+	driller_remove_map(map, map_base);
+	*size += m->m_drill.length;
+
+	/* notify sender of recv completion */
+	src->driller_send_running = 0;
+}
+
+static void mmpi_handle_ctrl(struct message *m) {
+	struct map_rec *map;
+	struct fdkey *key;
+
+	switch(m->m_type) {
+	case MSG_DRILLER_INVAL:
+		map = &m->m_drill.map;
+		key = &m->m_drill.key;
+		//xxx todo: remove map+fd from cache
+		break;
+	default:
+		err("bad message type: %d", m->m_type);
+	}
+}
+
 void mmpi_recv(int src_rank, void *buf, size_t *size) {
 	struct shmem *my = shmem + rank;
 	struct shmem *src = shmem + src_rank;
 	struct message *m = NULL;
-	int last_frag;
+	int last_frag = 0;
 	char *p = buf;
 
 	*size = 0;
 	do {
 		m = msg_dequeue_head_from(&my->recv_q, src_rank);
 
-		memcpy(p, m->m_payload, m->m_size);
-		p += m->m_size;
-		*size += m->m_size;
-		last_frag = (m->m_flags & MSGFLAG_LAST_FRAG);
+		switch(m->m_type) {
+		case MSG_DATA:
+		case MSG_FRAG:
+			assert(m->m_size <= MSG_PAYLOAD_SIZE_BYTES);
+			memcpy(p, m->m_payload, m->m_size);
+			p += m->m_size;
+			*size += m->m_size;
+			last_frag = (m->m_type == MSG_DATA);
+			break;
+		case MSG_DRILLER:
+			mmpi_recv_driller(src_rank, buf, size, m);
+			last_frag = 1;
+			break;
+		case MSG_DRILLER_INVAL:
+			mmpi_handle_ctrl(m);
+			break;
+		default:
+			err("bad message type: %d", m->m_type);
+		}
 
 		msg_queue_lock(&src->free_q);
 		__msg_enqueue_head(&src->free_q, m);

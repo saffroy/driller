@@ -28,6 +28,7 @@ enum fdproxy_reqtype {
 	FD_RSP_KEYFOUND,
 	FD_RSP_KEY,
 	FD_RSP_NOKEY,
+	FD_INVAL_KEY,
 };
 struct fdproxy_request {
 	int magic;

@@ -67,6 +67,16 @@ static int fdtable_lookup(struct fdkey *key) {
 	return fd;
 }
 
+static void fdtable_invalidate(struct fdkey *key) {
+	int fd;
+
+	fd = fdtable_lookup(key);
+	if(fd != -1) {
+		close(fd);
+		fdtable_add(-1, key);
+	}
+}
+
 /* rcv_request, send_request implement fd passing with UNIX socket ancillary data
    code copied (and fixed) from: 
    http://linux-vserver.org/Secure_chroot_Barrier */
@@ -203,6 +213,9 @@ static void fdproxy_handle_in(struct connection_context *cl) {
 			cl->state = STATE_RCV_REQ_KEY;
 			cl->rcvd_key = req.key;
 			break;
+		case FD_INVAL_KEY:
+			fdtable_invalidate(&req.key);
+			break;
 		default:
 			err("bad request %d", req.type);
 		}
@@ -282,6 +295,16 @@ int fdproxy_client_get_fd(struct fdkey *key) {
 	assert(memcmp(&req.key, key, sizeof(*key)) == 0);
 	assert(req.type == FD_RSP_KEY);
 	return fd;
+}
+
+void fdproxy_client_invalidate_fd(struct fdkey *key) {
+	struct fdproxy_request req;
+
+	/* send request notifying stale key */
+	req.magic = REQUEST_MAGIC;
+	req.type = FD_INVAL_KEY;
+	req.key = *key;
+	send_request(client_sock, &req, sizeof(req), NULL, 0);
 }
 
 
