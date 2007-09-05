@@ -334,35 +334,48 @@ static void fdproxy_daemon(void) {
 		perr("listen");
 
 	for(;;) {
-		int i, rc;
+		int i, rc, nactive;
 
-		for(i = 0; i < nctx; i++) {
-			ctx_pollfd[i].fd  = ctx[i].sock;
+		for(i = 0, nactive = 0; i < nctx; i++) {
+			if(ctx[i].sock == -1)
+				continue;
+			ctx_pollfd[nactive].fd  = ctx[i].sock;
 			switch(ctx[i].state) {
 			case STATE_IDLE:	/* expect any request */
 			case STATE_RCV_NEW_KEY:	/* expect FD_ADD_KEY */
-				ctx_pollfd[i].events = POLLIN;
+				ctx_pollfd[nactive].events = POLLIN;
 				break;
 			case STATE_RCV_REQ_KEY:	/* need to send response */
-				ctx_pollfd[i].events = POLLOUT;
+				ctx_pollfd[nactive].events = POLLOUT;
 				break;
 			}
+			nactive++;
 		}
-		ctx_pollfd[nctx].fd = server_sock;
-		ctx_pollfd[nctx].events = POLLIN;
+		if((nactive == 0) && (nctx != 0)) {
+			dbg("last client disconnected, exiting");
+			_exit(0);
+		}
+		ctx_pollfd[nactive].fd = server_sock;
+		ctx_pollfd[nactive].events = POLLIN;
 
-		rc = poll(ctx_pollfd, nctx+1, -1);
+		rc = poll(ctx_pollfd, nactive+1, -1);
 		if(rc < 0)
 			perr("poll");
 
-		for(i = 0; i < nctx; i++) {
-			int revents = ctx_pollfd[i].revents;
+		for(i = 0, nactive = 0; i < nctx; i++) {
+			int revents = ctx_pollfd[nactive].revents;
 
-			//XXX todo: handle HUP gracefully
-			if(revents & (POLLHUP|POLLERR|POLLNVAL)) {
-				err("client %d revents = %s%s%s",
+			if(ctx[i].sock == -1)
+				continue;
+			nactive++;
+			if(revents & POLLHUP) {
+				ctx[i].sock = -1;
+				dbg("client %d closed its connection", i);
+				continue;
+			}
+			if(revents & (POLLERR|POLLNVAL)) {
+				err("client %d revents = %s%s",
 				    i,
-				    revents & POLLHUP ? "HUP " : "",
 				    revents & POLLERR ? "ERR " : "",
 				    revents & POLLNVAL ? "NVAL " : "");
 			}
@@ -373,7 +386,7 @@ static void fdproxy_daemon(void) {
 		}
 
 		/* accept new clients */
-		if(ctx_pollfd[nctx].revents & POLLIN) {
+		if(ctx_pollfd[nactive].revents & POLLIN) {
 			assert(nctx < FDPROXY_MAX_CLIENTS);
 
 			ctx[nctx].sock = accept(server_sock, NULL, NULL);

@@ -87,16 +87,16 @@ Pros
  * cleanup of shared mem segments handled by the kernel
 
 Cons
- * default tmpfs size is half of the memory, it may need to be increased
  * requires external allocator so mmap can be overloaded
  * dlmallopt is not glibc-compatible (though rather close)
  * fork does not work (yet?)
  * increased memory consumption: segments are completely rewritten, no
    sharing of unmodified datas (how much? not sure if it's significant)
- * not thread safe (yet)
+ * default tmpfs size is half of the memory, it may need to be increased
  * stack growth costs signal + 2 syscalls (mmap + getrlimit)
    mitigated by stack growth granularity
    could save call to getrlimit
+ * not thread safe (yet)
  * not sure if it breaks some libs (qx, ib), may be worked around (blacklist)
  * some linuxisms limit OS portability:
    credentials over unix sockets (optional)
@@ -110,4 +110,10 @@ Cons
    see also notes above
  * brk can no longer grow the heap
    malloc uses mmap areas instead; can be improved by overloading brk
-   brk overloaded, so it's ok; costs 2 syscalls instead of one
+   brk overloaded, so it's ok
+ * brk costs 2 syscalls instead of one (ftruncate + mmap)
+ * malloc of mmap'ed area costs 3 syscalls (open + ftruncate + mmap) vs. 1
+   could be mitigated by fd cache
+ * free of mmap'ed area costs 3 syscalls (munmap + ftruncate + close) vs. 1
+   could be mitigated by fd cache
+ * mremap of mmap'ed area costs 2 syscalls (ftruncate + mremap) vs. 1
