@@ -11,7 +11,7 @@ static void usage(char *progname) {
 
 int main(int argc, char**argv) {
 	int jobid, nprocs, rank, i;
-	struct fdkey key1, key2;
+	struct fdkey key1, key2, key3;
 	size_t sz;
 
 	/* parse args */
@@ -56,6 +56,9 @@ int main(int argc, char**argv) {
 		int fd_out, fd_err;
 		FILE *new_out, *new_err;
 
+		printf("rank %d fetches bogus fd\n", rank);
+		fd_err = fdproxy_client_get_fd(&key3);
+		assert(fd_err == -1);
 		printf("rank %d fetches new stdout\n", rank);
 		fd_out = fdproxy_client_get_fd(&key1);
 		printf("rank %d fetches new stderr\n", rank);

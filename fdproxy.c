@@ -49,16 +49,21 @@ static int fdtable_lookup(struct fdkey *key) {
 	char buf[20];
 	int len;
 	ENTRY e, *ep;
+	int fd;
 
 	len = snprintf(buf, sizeof(buf), "%d/%d", key->pid, key->fd);
 	assert(len < sizeof(buf));
 
 	e.key = buf;
 	ep = hsearch(e, FIND);
-	if(ep == NULL)
-		err("cannot find '%s' in htable", buf);
-	dbg("lookup %s = %d", buf, (int)(long)ep->data);
-	return (int)(long)ep->data;
+	if(ep != NULL)
+		fd = (int)(long)ep->data;
+	else {
+		warn("cannot find '%s' in htable", buf);
+		fd = -1;
+	}
+	dbg("lookup %s = %d", buf, fd);
+	return fd;
 }
 
 /* rcv_request, send_request implement fd passing with UNIX socket ancillary data
@@ -167,9 +172,17 @@ static void fdproxy_server_send_fd(int sock, int fd, struct fdkey *key) {
 
 	/* send response to FD_REQ_KEY */
 	req.magic = REQUEST_MAGIC;
-	req.type = FD_RSP_KEY;
 	req.key = *key;
-	send_request(sock, &req, sizeof(req), &fd, 1);
+	if(fd >= 0) {
+		req.type = FD_RSP_KEYFOUND;
+		send_request(sock, &req, sizeof(req), NULL, 0);
+
+		req.type = FD_RSP_KEY;
+		send_request(sock, &req, sizeof(req), &fd, 1);
+	} else {
+		req.type = FD_RSP_NOKEY;
+		send_request(sock, &req, sizeof(req), NULL, 0);
+	}
 }
 
 static void fdproxy_handle_in(struct connection_context *cl) {
@@ -190,7 +203,7 @@ static void fdproxy_handle_in(struct connection_context *cl) {
 			cl->rcvd_key = req.key;
 			break;
 		default:
-			err("bad request %d\n", req.type);
+			err("bad request %d", req.type);
 		}
 		break;
 
@@ -201,7 +214,7 @@ static void fdproxy_handle_in(struct connection_context *cl) {
 		break;
 
 	default:
-		err("bad client state: %d\n", cl->state);
+		err("bad client state: %d", cl->state);
 	}
 }
 
@@ -217,7 +230,7 @@ static void fdproxy_handle_out(struct connection_context *cl) {
 		break;
 
 	default:
-		err("bad client state: %d\n", cl->state);
+		err("bad client state: %d", cl->state);
 	}
 }
 
@@ -249,11 +262,24 @@ int fdproxy_client_get_fd(struct fdkey *key) {
 	req.key = *key;
 	send_request(client_sock, &req, sizeof(req), NULL, 0);
 
-	/* receive response with fd */
+	/* receive response */
+	rcv_request(client_sock, &req, sizeof(req), NULL, 0);
+	assert(req.magic == REQUEST_MAGIC);
+	assert(memcmp(&req.key, key, sizeof(*key)) == 0);
+	switch(req.type) {
+	case FD_RSP_NOKEY:
+		return -1;
+	case FD_RSP_KEYFOUND:
+		break;
+	default:
+		err("bad server reply: %d", req.type);
+	}
+
+	/* receive fd */
 	rcv_request(client_sock, &req, sizeof(req), &fd, 1);
 	assert(req.magic == REQUEST_MAGIC);
-	assert(req.type == FD_RSP_KEY);
 	assert(memcmp(&req.key, key, sizeof(*key)) == 0);
+	assert(req.type == FD_RSP_KEY);
 	return fd;
 }
 
