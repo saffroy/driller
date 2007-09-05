@@ -225,8 +225,10 @@ void fdproxy_client_send_fd(int fd, struct fdkey *key) {
 	struct fdproxy_request req;
 
 	/* send request notifying new key */
-	key->pid = getpid();
-	key->fd = fd;
+	if(key->pid != FDKEY_WELLKNOWN) {
+		key->pid = getpid();
+		key->fd = fd;
+	}
 	req.magic = REQUEST_MAGIC;
 	req.type = FD_NEW_KEY;
 	req.key = *key;
@@ -305,6 +307,8 @@ static void fdproxy_daemon(void) {
 
 		for(i = 0; i < nctx; i++) {
 			int revents = ctx_pollfd[i].revents;
+
+			//XXX todo: handle HUP gracefully
 			if(revents & (POLLHUP|POLLERR|POLLNVAL)) {
 				err("client %d revents = %s%s%s",
 				    i,
@@ -333,7 +337,7 @@ static void fdproxy_daemon(void) {
 	/* NOT REACHED */
 }
 
-void fdproxy_init(int do_fork, int proxy_id) {
+void fdproxy_init(int proxy_id, int do_fork) {
 	struct sockaddr_un addr;
 	int i, rc;
 

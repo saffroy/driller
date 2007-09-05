@@ -28,8 +28,10 @@
 static inline void nop(void) {
 #if USE_SCHED_YIELD
 	sched_yield();
-#else
+#elif __x86_64__ || __i386__
 	asm volatile("rep; nop" : : ); // XXX not sure it's a pause on x64
+#else
+	/* nop */
 #endif
 }
 
@@ -125,12 +127,15 @@ static void spin_lock_init(struct spinlock *lock) {
 
 static inline int spin_trylock(struct spinlock *lock) {
 	int oldval;
- 
+
+#if __x86_64__ || __i386__ 
 	asm volatile(
 		"xchgl %0,%1"
 		:"=q" (oldval), "=m" (lock->lck)
 		:"0" (0) : "memory");
-
+#else
+#error function spin_trylock needs porting to your architecture!
+#endif
         return oldval > 0;
 }
 
@@ -266,7 +271,7 @@ void mmpi_init(int jobid, int n, int r) {
 	mmpi_barrier();
 }
 
-void mmpi_send(int dest_rank, char *buf, size_t size) {
+void mmpi_send(int dest_rank, void *buf, size_t size) {
 	struct shmem *my = shmem + rank;
 	struct shmem *dest = shmem + dest_rank;
 	struct message *m;
@@ -283,7 +288,7 @@ void mmpi_send(int dest_rank, char *buf, size_t size) {
 	msg_queue_unlock(&dest->recv_q);
 }
 
-void mmpi_recv(int src_rank, char *buf, size_t *size) {
+void mmpi_recv(int src_rank, void *buf, size_t *size) {
 	struct shmem *my = shmem + rank;
 	struct shmem *src = shmem + src_rank;
 	struct message *m = NULL;

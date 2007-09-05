@@ -26,25 +26,30 @@ int main(int argc, char**argv) {
 
 	/* init fdproxy */
 	if(rank == 0)
-		/* rank 0 forks fdproxy daemon */
-		fdproxy_init(1, jobid);
+		/* only rank 0 forks fdproxy daemon */
+		fdproxy_init(jobid, 1);
 	else
-		fdproxy_init(0, jobid);
+		fdproxy_init(jobid, 0);
 
+	/* let siblings duplicate stdout/stderr from rank 0
+	 * for stdout we have fdproxy make the fd key,
+	 *   and we send it to siblings
+	 * for stderr we use a "well-known" key id
+	 */
 	if(rank == 0) {
 		printf("rank 0 sends stdout\n");
+		memset(&key1, 0, sizeof(key1));
 		fdproxy_client_send_fd(1, &key1);
 		for(i = 1; i < nprocs; i++)
 			mmpi_send(i, &key1, sizeof(key1));
+
 		printf("rank 0 sends stderr\n");
+		fdproxy_set_key_id(&key2, 0x123);
 		fdproxy_client_send_fd(2, &key2);
-		for(i = 1; i < nprocs; i++)
-			mmpi_send(i, &key2, sizeof(key2));
 	} else {
 		mmpi_recv(0, &key1, &sz);
 		assert(sz == sizeof(key1));
-		mmpi_recv(0, &key2, &sz);
-		assert(sz == sizeof(key2));
+		fdproxy_set_key_id(&key2, 0x123);
 	}
 
 	if(rank != 0) {
@@ -57,7 +62,11 @@ int main(int argc, char**argv) {
 		fd_err = fdproxy_client_get_fd(&key2);
 
 		new_out = fdopen(fd_out, "w");
+		if(new_out == NULL)
+			perr("fdopen");
 		new_err = fdopen(fd_err, "w");
+		if(new_err == NULL)
+			perr("fdopen");
 
 		fprintf(new_out, "rank %d writes to rank 0's stdout\n", rank);
 		fprintf(new_err, "rank %d writes to rank 0's stderr\n", rank);
