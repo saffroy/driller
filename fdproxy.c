@@ -18,14 +18,14 @@ static void fdtable_init(void) {
 	assert(hcreate(fdtable_hsize) != 0);
 }
 
-static void fdtable_add(int fd, long key) {
+static void fdtable_add(int fd, struct fdkey *key) {
 	char buf[20];
 	int len;
 	ENTRY e, *ep;
 
-	dbg("add <0x%lx:%d>", key, fd);
+	dbg("add <%d/%d:%d>", key->pid, key->fd, fd);
 
-	len = snprintf(buf, sizeof(buf), "0x%lx", key);
+	len = snprintf(buf, sizeof(buf), "%d/%d", key->pid, key->fd);
 	assert(len < sizeof(buf));
 
 	e.key = strdup(buf);
@@ -45,12 +45,12 @@ static void fdtable_add(int fd, long key) {
 	}
 }
 
-static int fdtable_lookup(long key) {
+static int fdtable_lookup(struct fdkey *key) {
 	char buf[20];
 	int len;
 	ENTRY e, *ep;
 
-	len = snprintf(buf, sizeof(buf), "0x%lx", key);
+	len = snprintf(buf, sizeof(buf), "%d/%d", key->pid, key->fd);
 	assert(len < sizeof(buf));
 
 	e.key = buf;
@@ -150,7 +150,7 @@ static void send_request(int fd, void const *buf, size_t buf_len, int const *fds
 		warn("sendmsg returned %zd expected %zd", len, buf_len);
 }
 
-static int fdproxy_server_get_fd(int sock, long key) {
+static int fdproxy_server_get_fd(int sock, struct fdkey *key) {
 	struct fdproxy_request req;
 	int fd;
 
@@ -158,17 +158,17 @@ static int fdproxy_server_get_fd(int sock, long key) {
 	rcv_request(sock, &req, sizeof(req), &fd, 1);
 	assert(req.magic == REQUEST_MAGIC);
 	assert(req.type == FD_ADD_KEY);
-	assert(req.key == key);
+	assert(memcmp(&req.key, key, sizeof(*key)) == 0);
 	return fd;
 }
 
-static void fdproxy_server_send_fd(int sock, int fd, long key) {
+static void fdproxy_server_send_fd(int sock, int fd, struct fdkey *key) {
 	struct fdproxy_request req;
 
 	/* send response to FD_REQ_KEY */
 	req.magic = REQUEST_MAGIC;
 	req.type = FD_RSP_KEY;
-	req.key = key;
+	req.key = *key;
 	send_request(sock, &req, sizeof(req), &fd, 1);
 }
 
@@ -195,8 +195,8 @@ static void fdproxy_handle_in(struct connection_context *cl) {
 		break;
 
 	case STATE_RCV_NEW_KEY:
-		fd = fdproxy_server_get_fd(cl->sock, cl->rcvd_key);
-		fdtable_add(fd, cl->rcvd_key);
+		fd = fdproxy_server_get_fd(cl->sock, &cl->rcvd_key);
+		fdtable_add(fd, &cl->rcvd_key);
 		cl->state = STATE_IDLE;
 		break;
 
@@ -210,10 +210,10 @@ static void fdproxy_handle_out(struct connection_context *cl) {
 
 	switch(cl->state) {
 	case STATE_RCV_REQ_KEY:
-		fd = fdtable_lookup(cl->rcvd_key);
-		fdproxy_server_send_fd(cl->sock, fd, cl->rcvd_key);
+		fd = fdtable_lookup(&cl->rcvd_key);
+		fdproxy_server_send_fd(cl->sock, fd, &cl->rcvd_key);
 		cl->state = STATE_IDLE;
-		cl->rcvd_key = 0;
+		memset(&cl->rcvd_key, 0, sizeof(cl->rcvd_key));
 		break;
 
 	default:
@@ -221,13 +221,15 @@ static void fdproxy_handle_out(struct connection_context *cl) {
 	}
 }
 
-void fdproxy_client_send_fd(int fd, long key) {
+void fdproxy_client_send_fd(int fd, struct fdkey *key) {
 	struct fdproxy_request req;
 
 	/* send request notifying new key */
+	key->pid = getpid();
+	key->fd = fd;
 	req.magic = REQUEST_MAGIC;
 	req.type = FD_NEW_KEY;
-	req.key = key;
+	req.key = *key;
 	send_request(client_sock, &req, sizeof(req), NULL, 0);
 
 	/* send fd proper */
@@ -235,21 +237,21 @@ void fdproxy_client_send_fd(int fd, long key) {
 	send_request(client_sock, &req, sizeof(req), &fd, 1);
 }
 
-int fdproxy_client_get_fd(long key) {
+int fdproxy_client_get_fd(struct fdkey *key) {
 	struct fdproxy_request req;
 	int fd;
 
 	/* send request for key */
 	req.magic = REQUEST_MAGIC;
 	req.type = FD_REQ_KEY;
-	req.key = key;
+	req.key = *key;
 	send_request(client_sock, &req, sizeof(req), NULL, 0);
 
 	/* receive response with fd */
 	rcv_request(client_sock, &req, sizeof(req), &fd, 1);
 	assert(req.magic == REQUEST_MAGIC);
 	assert(req.type == FD_RSP_KEY);
-	assert(req.key == key);
+	assert(memcmp(&req.key, key, sizeof(*key)) == 0);
 	return fd;
 }
 

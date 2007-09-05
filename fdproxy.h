@@ -4,6 +4,12 @@
 #define FDPROXY_MAX_CLIENTS 32
 #define CONNECT_TIMEOUT 5 /* seconds */
 
+/* this identifies a file among all processes */
+struct fdkey {
+	pid_t pid;	/* pid of creator */
+	int fd;		/* fd num used by creator */
+};
+
 /*
  * request FD_NEW_KEY
  *  notify proxy of new (fd,key) pair
@@ -25,7 +31,7 @@ enum fdproxy_reqtype {
 struct fdproxy_request {
 	int magic;
 	int type;
-	long key;
+	struct fdkey key;
 };
 
 /*
@@ -45,11 +51,11 @@ enum conn_state {
 struct connection_context {
 	int sock;
 	enum conn_state state;
-	int rcvd_key;
+	struct fdkey rcvd_key;
 };
 
 void fdproxy_init(int do_fork, int proxy_id);
-void fdproxy_client_send_fd(int fd, long key);
-int fdproxy_client_get_fd(long key);
+void fdproxy_client_send_fd(int fd, struct fdkey *key);
+int fdproxy_client_get_fd(struct fdkey *key);
 
 #endif /* FDPROXY_H */
