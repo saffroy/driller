@@ -1,5 +1,4 @@
 - integrate with mmpi
- * setup shared mem with fdproxy (cf sharemem.c)
  * add message types: simple, fragmented, driller
  * get map for address (from driller)
  * send/recv (fd key, offset) to/from sibling

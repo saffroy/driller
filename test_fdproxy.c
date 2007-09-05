@@ -24,12 +24,7 @@ int main(int argc, char**argv) {
 	mmpi_init(jobid, nprocs, rank);
 	mmpi_barrier();
 
-	/* init fdproxy */
-	if(rank == 0)
-		/* only rank 0 forks fdproxy daemon */
-		fdproxy_init(jobid, 1);
-	else
-		fdproxy_init(jobid, 0);
+	/* fdproxy already initialized by mmpi_init */
 
 	/* let siblings duplicate stdout/stderr from rank 0
 	 * for stdout we have fdproxy make the fd key,

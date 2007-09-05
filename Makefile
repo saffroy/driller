@@ -9,7 +9,7 @@ progs := test_mmpi test_fdproxy test_driller test_dlmalloc
 
 all: $(progs)
 
-test_mmpi: test_mmpi.o mmpi.o
+test_mmpi: test_mmpi.o mmpi.o fdproxy.o
 test_fdproxy: test_fdproxy.o fdproxy.o mmpi.o
 test_driller: test_driller.o driller.o dlmalloc.o
 test_dlmalloc: test_dlmalloc.o dlmalloc.o

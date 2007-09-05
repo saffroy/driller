@@ -13,6 +13,7 @@
 #include "mmpi.h"
 #include "mmpi_internal.h"
 #include "log.h"
+#include "fdproxy.h"
 
 #define CONNECT_TIMEOUT 5 /* seconds */
 #define USE_TMPFS 1
@@ -207,47 +208,40 @@ static int rank;
 static void mmpi_init_shmem(void) {
 	unsigned int page_size;
 	unsigned int shmem_size;
-	char *filename;
 	int shmem_fd;
-	int len;
 	int i;
+	struct fdkey key;
 
 	shmem_size = nprocs*sizeof(*shmem);
 	page_size = sysconf(_SC_PAGESIZE);
 	shmem_size = (shmem_size + page_size - 1) & ~(page_size - 1);
-
-	/* create file */
-	len = snprintf(NULL, 0, "%s/mmpi_shmem-%d", TMPDIR, jobid);
-	filename = malloc(1+len);
-	sprintf(filename, "%s/mmpi_shmem-%d", TMPDIR, jobid);
+	fdproxy_set_key_id(&key, 0xf003333);
 
 	if(rank == 0) {
+		char *filename;
+		int len;
+
+		/* create file */
+		len = snprintf(NULL, 0, "%s/mmpi_shmem-%d", TMPDIR, jobid);
+		filename = malloc(1+len);
+		sprintf(filename, "%s/mmpi_shmem-%d", TMPDIR, jobid);
+
 		shmem_fd = open(filename, O_CREAT|O_TRUNC|O_RDWR, 0600);
 		if(shmem_fd < 0)
 			perr("open");
+		if(unlink(filename) < 0)
+			perr("unlink");
+		free(filename);
 		if(ftruncate(shmem_fd, shmem_size))
 			perr("truncate");
 		dbg("allocated %d kB of shared mem", shmem_size/1024);
-	} else {
-		for(i = 0; i < CONNECT_TIMEOUT; i++) {
-			shmem_fd = open(filename, O_RDWR, 0600);
-			if(shmem_fd >= 0)
-				break;
-			if(errno != ENOENT)
-				perr("open");
-			sleep(1);
-		}
-		if(shmem_fd < 0)
-			err("could not open shared mem after %d seconds",
-			    CONNECT_TIMEOUT);
-	}
 
-	shmem = mmap(NULL, shmem_size, PROT_READ|PROT_WRITE, 
-		     MAP_SHARED|MAP_NORESERVE, shmem_fd, 0);
-	if(shmem == (void*)-1)
-		perr("mmap");
+		shmem = mmap(NULL, shmem_size, PROT_READ|PROT_WRITE, 
+			     MAP_SHARED|MAP_NORESERVE, shmem_fd, 0);
+		if(shmem == (void*)-1)
+			perr("mmap");
 
-	if(rank == 0) {
+		/* initialize shmem */
 		for(i = 0; i < nprocs; i++) {
 			struct shmem *shm = shmem + i;
 			struct message *m;
@@ -261,12 +255,38 @@ static void mmpi_init_shmem(void) {
 				__msg_enqueue(&shm->free_q, m);
 			}
 		}
+
+		/* now share it with siblings */
+		fdproxy_client_send_fd(shmem_fd, &key);
+	} else {
+		/* retrieve fd for shmem created by rank 0 */
+		for(i = 0; i < CONNECT_TIMEOUT; i++) {
+			shmem_fd = fdproxy_client_get_fd(&key);
+			if(shmem_fd >= 0)
+				break;
+			sleep(1);
+		}
+		if(shmem_fd < 0)
+			err("could not retrieve shared mem fd after %d seconds",
+			    CONNECT_TIMEOUT);
+
+		shmem = mmap(NULL, shmem_size, PROT_READ|PROT_WRITE, 
+			     MAP_SHARED|MAP_NORESERVE, shmem_fd, 0);
+		if(shmem == (void*)-1)
+			perr("mmap");
 	}
 }
 
 void mmpi_init(int jobid, int n, int r) {
 	nprocs = n;
 	rank = r;
+
+	if(rank == 0)
+		/* only rank 0 forks fdproxy daemon */
+		fdproxy_init(jobid, 1);
+	else
+		fdproxy_init(jobid, 0);
+
 	mmpi_init_shmem();
 	mmpi_barrier();
 }

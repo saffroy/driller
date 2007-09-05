@@ -24,7 +24,11 @@ static inline void fdproxy_set_key_id(struct fdkey *key, int id) {
  *
  * request FD_REQ_KEY
  *  ask for fd matching given key
- *  response FD_RSP_KEY which has ancillary fd
+ *  if key found:
+ *   response FD_RSP_KEYFOUND
+ *   response FD_RSP_KEY which has ancillary fd
+ *  else:
+ *   response FD_RSP_NOKEY
  */
 
 #define REQUEST_MAGIC 0xf004242
@@ -48,7 +52,7 @@ struct fdproxy_request {
  * STATE_RCV_NEW_KEY
  *  client has sent FD_NEW_KEY, expect FD_ADD_KEY
  * STATE_RCV_REQ_KEY
- *  client has sent FD_REQ_KEY, need to send FD_RSP_KEY
+ *  client has sent FD_REQ_KEY, need to send FD_RSP_{KEYFOUND,KEY,NOKEY}
  */
 
 enum conn_state {
