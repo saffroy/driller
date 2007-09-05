@@ -14,6 +14,7 @@ static void usage(char *progname) {
 
 int main(int argc, char**argv) {
 	int jobid, nprocs, rank, iter;
+	char *buf;
 
 	/* parse args */
 	if(argc != 5)
@@ -55,9 +56,12 @@ int main(int argc, char**argv) {
 		       (float)delta/(float)iter);
 	}
 
+	mmpi_barrier();
+
 	/* test send/recv */
 	if(rank != 0) {
 		int i;
+
 		printf("%d: send to %d\n", rank, 0);
 		for(i = 0; i < iter; i++)
 			mmpi_send(0, (char*)&rank, sizeof(rank));
@@ -73,6 +77,7 @@ int main(int argc, char**argv) {
 		for(j = 1; j < nprocs; j++) {
 			int r;
 			size_t sz;
+
 			printf("%d: recv from %d\n", rank, j);
 			for(i = 0; i < iter; i++) {
 				mmpi_recv(j, (char*)&r, &sz);
@@ -87,6 +92,50 @@ int main(int argc, char**argv) {
 		       (float)delta/(float)iter);
 		}
 	}
+
+	mmpi_barrier();
+
+	/* test throughput */
+#define bufsz (1 << 24) /* 16 MB */
+#define volume (1 << 30) /* 1 GB */
+#define nbufs (volume/bufsz)
+	buf = malloc(bufsz);
+	if(rank != 0) {
+		int i;
+
+		printf("%d: send to %d\n", rank, 0);
+		for(i = 0; i < nbufs; i++) {
+			memset(buf, (char)i, bufsz);
+			mmpi_send(0, buf, bufsz);
+		}
+	} else {
+		int i, j;
+		struct timeval tv1, tv2;
+		long delta;
+
+		printf("now time send/recv throughput (%d MB)...\n", 
+		       volume/(1<<20));
+		gettimeofday(&tv1, NULL);
+
+		for(j = 1; j < nprocs; j++) {
+			size_t sz;
+
+			printf("%d: recv from %d\n", rank, j);
+			for(i = 0; i < nbufs; i++) {
+				mmpi_recv(j, buf, &sz);
+				assert(sz == bufsz);
+				assert(buf[0] == (char)i);
+				assert(buf[bufsz-1] == (char)i);
+			}
+
+		gettimeofday(&tv2, NULL);
+		delta = (tv2.tv_usec - tv1.tv_usec) / 1000000
+			+ (tv2.tv_sec - tv1.tv_sec);
+		printf("average send/recv throughput: %.2fMB/s\n",
+		       (float)volume/(float)(1<<20)/(float)delta);
+		}
+	}
+
 
 	mmpi_barrier();
 	printf("SUCCESS! rank %d exits\n", rank);

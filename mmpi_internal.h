@@ -30,23 +30,28 @@ struct spinlock {
  */
 
 #define __cacheline_aligned __attribute__((__aligned__(64)))
-#define MSG_PAYLOAD_SIZE_BYTES 64
+#define MSG_PAYLOAD_SIZE_BYTES 4096
+#define MSG_POOL_SIZE 1024
+
+enum msg_flags {
+	MSGFLAG_NONE = 0,
+	MSGFLAG_LAST_FRAG = 1,
+};
 
 struct message {
 	struct list_head m_list;
-	int m_flags;
+	enum msg_flags m_flags;
 	int m_size;
 	int m_src;
 	char m_payload[MSG_PAYLOAD_SIZE_BYTES];
 };
+
 
 struct message_queue {
 	struct spinlock q_lock __cacheline_aligned;
 	struct list_head q_list;
 	int q_length;
 };
-
-#define MSG_POOL_SIZE 10
 
 struct shmem {
 	volatile int barrier_box __cacheline_aligned;

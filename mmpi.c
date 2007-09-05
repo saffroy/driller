@@ -189,12 +189,35 @@ static inline void msg_queue_unlock(struct message_queue *q) {
 static struct message *msg_dequeue_head(struct message_queue *q) {
 	struct message *m = NULL;
 
-	msg_queue_lock(q);
-	if(!__msg_queue_empty(q)) {
-		m = list_entry(list_next(&q->q_list), struct message, m_list);
-		__msg_dequeue(q, m);
-	}
-	msg_queue_unlock(q);
+	do {
+		msg_queue_lock(q);
+		if(!__msg_queue_empty(q)) {
+			m = list_entry(list_next(&q->q_list),
+				       struct message, m_list);
+			__msg_dequeue(q, m);
+		}
+		msg_queue_unlock(q);
+	} while(m == NULL);
+	return m;
+}
+
+static struct message *msg_dequeue_head_from(struct message_queue *q, int src) {
+	struct message *m = NULL;
+
+	do {
+		struct list_head *p;
+
+		msg_queue_lock(q);
+		list_for_each(p, &q->q_list) {
+			m = list_entry(p, struct message, m_list);
+			if(m->m_src == src) {
+				__msg_dequeue(q, m);
+				break;
+			} else
+				m = NULL;
+		}
+		msg_queue_unlock(q);
+	} while(m == NULL);
 	return m;
 }
 
@@ -295,45 +318,44 @@ void mmpi_send(int dest_rank, void *buf, size_t size) {
 	struct shmem *my = shmem + rank;
 	struct shmem *dest = shmem + dest_rank;
 	struct message *m;
+	size_t remainder = size;
+	char *p = buf;
 
 	do {
 		m = msg_dequeue_head(&my->free_q);
-	} while(m == NULL);
 
-	m->m_size = size;
-	memcpy(m->m_payload, buf, size);
+		m->m_size = min(remainder, MSG_PAYLOAD_SIZE_BYTES);
+		memcpy(m->m_payload, p, m->m_size);
+		p += m->m_size;
+		remainder -= m->m_size;
+		m->m_flags = remainder ? MSGFLAG_NONE : MSGFLAG_LAST_FRAG;
 
-	msg_queue_lock(&dest->recv_q);
-	__msg_enqueue(&dest->recv_q, m);
-	msg_queue_unlock(&dest->recv_q);
+		msg_queue_lock(&dest->recv_q);
+		__msg_enqueue(&dest->recv_q, m);
+		msg_queue_unlock(&dest->recv_q);
+	} while(remainder > 0);
 }
 
 void mmpi_recv(int src_rank, void *buf, size_t *size) {
 	struct shmem *my = shmem + rank;
 	struct shmem *src = shmem + src_rank;
 	struct message *m = NULL;
+	int last_frag;
+	char *p = buf;
 
+	*size = 0;
 	do {
-		struct list_head *p;
+		m = msg_dequeue_head_from(&my->recv_q, src_rank);
 
-		msg_queue_lock(&my->recv_q);
-		list_for_each(p, &my->recv_q.q_list) {
-			m = list_entry(p, struct message, m_list);
-			if(m->m_src == src_rank) {
-				__msg_dequeue(&my->recv_q, m);
-				break;
-			} else
-				m = NULL;
-		}
-		msg_queue_unlock(&my->recv_q);
-	} while(m == NULL);
+		memcpy(p, m->m_payload, m->m_size);
+		p += m->m_size;
+		*size += m->m_size;
+		last_frag = (m->m_flags & MSGFLAG_LAST_FRAG);
 
-	*size = m->m_size;
-	memcpy(buf, m->m_payload, m->m_size);
-
-	msg_queue_lock(&src->free_q);
-	__msg_enqueue_head(&src->free_q, m);
-	msg_queue_unlock(&src->free_q);
+		msg_queue_lock(&src->free_q);
+		__msg_enqueue_head(&src->free_q, m);
+		msg_queue_unlock(&src->free_q);
+	} while(!last_frag);
 }
 
 void mmpi_barrier(void) {

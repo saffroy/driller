@@ -19,9 +19,6 @@
 #define TMPDIR "/tmp"
 #endif
 
-#define min(x,y) (x < y ? x : y)
-#define max(x,y) (x > y ? x : y)
-
 enum overload_t {
 	OVERLOAD_REG,
 	OVERLOAD_HEAP,

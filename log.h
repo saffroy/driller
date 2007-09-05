@@ -36,4 +36,11 @@
 #define dbg(fmt,arg...) do { } while(0)
 #endif
 
+/*
+ * utilities
+ */
+
+#define min(x,y) (x < y ? x : y)
+#define max(x,y) (x > y ? x : y)
+
 #endif /* LOG_H */
