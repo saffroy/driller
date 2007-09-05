@@ -15,16 +15,6 @@
 #include "log.h"
 #include "fdproxy.h"
 
-#define CONNECT_TIMEOUT 5 /* seconds */
-#define USE_TMPFS 1
-#define USE_SCHED_YIELD 1
-
-#if USE_TMPFS
-#define TMPDIR "/dev/shm"
-#else
-#define TMPDIR "/tmp"
-#endif
-
 
 static inline void nop(void) {
 #if USE_SCHED_YIELD
@@ -238,7 +228,7 @@ static void mmpi_init_shmem(void) {
 	shmem_size = nprocs*sizeof(*shmem);
 	page_size = sysconf(_SC_PAGESIZE);
 	shmem_size = (shmem_size + page_size - 1) & ~(page_size - 1);
-	fdproxy_set_key_id(&key, 0xf003333);
+	fdproxy_set_key_id(&key, SHMEM_KEY_MAGIC);
 
 	if(rank == 0) {
 		char *filename;

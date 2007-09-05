@@ -29,6 +29,17 @@ struct spinlock {
  * shared mem and messages
  */
 
+#define CONNECT_TIMEOUT 5 /* seconds */
+#define USE_TMPFS 1
+#define USE_SCHED_YIELD 1
+#define SHMEM_KEY_MAGIC 0xf003333
+
+#if USE_TMPFS
+#define TMPDIR "/dev/shm"
+#else
+#define TMPDIR "/tmp"
+#endif
+
 #define __cacheline_aligned __attribute__((__aligned__(64)))
 #define MSG_PAYLOAD_SIZE_BYTES 4096
 #define MSG_POOL_SIZE 1024

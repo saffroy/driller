@@ -7,6 +7,9 @@
 #include "mmpi.h"
 #include "log.h"
 
+#define THRTEST_CHUNK_SIZE (1 << 24) /* 16 MB */
+#define THRTEST_VOLUME (1 << 30) /* 1 GB */
+#define THRTEST_CHUNK_COUNT (THRTEST_VOLUME/THRTEST_CHUNK_SIZE)
 
 static void usage(char *progname) {
 	err("usage: %s <job id> <job size> <rank> <iter>", progname);
@@ -96,17 +99,14 @@ int main(int argc, char**argv) {
 	mmpi_barrier();
 
 	/* test throughput */
-#define bufsz (1 << 24) /* 16 MB */
-#define volume (1 << 30) /* 1 GB */
-#define nbufs (volume/bufsz)
-	buf = malloc(bufsz);
+	buf = malloc(THRTEST_CHUNK_SIZE);
 	if(rank != 0) {
 		int i;
 
 		printf("%d: send to %d\n", rank, 0);
-		for(i = 0; i < nbufs; i++) {
-			memset(buf, (char)i, bufsz);
-			mmpi_send(0, buf, bufsz);
+		for(i = 0; i < THRTEST_CHUNK_COUNT; i++) {
+			memset(buf, (char)i, THRTEST_CHUNK_SIZE);
+			mmpi_send(0, buf, THRTEST_CHUNK_SIZE);
 		}
 	} else {
 		int i, j;
@@ -114,25 +114,25 @@ int main(int argc, char**argv) {
 		long delta;
 
 		printf("now time send/recv throughput (%d MB)...\n", 
-		       volume/(1<<20));
+		       THRTEST_VOLUME/(1<<20));
 		gettimeofday(&tv1, NULL);
 
 		for(j = 1; j < nprocs; j++) {
 			size_t sz;
 
 			printf("%d: recv from %d\n", rank, j);
-			for(i = 0; i < nbufs; i++) {
+			for(i = 0; i < THRTEST_CHUNK_COUNT; i++) {
 				mmpi_recv(j, buf, &sz);
-				assert(sz == bufsz);
+				assert(sz == THRTEST_CHUNK_SIZE);
 				assert(buf[0] == (char)i);
-				assert(buf[bufsz-1] == (char)i);
+				assert(buf[THRTEST_CHUNK_SIZE-1] == (char)i);
 			}
 
 		gettimeofday(&tv2, NULL);
 		delta = (tv2.tv_usec - tv1.tv_usec) / 1000000
 			+ (tv2.tv_sec - tv1.tv_sec);
 		printf("average send/recv throughput: %.2fMB/s\n",
-		       (float)volume/(float)(1<<20)/(float)delta);
+		       (float)THRTEST_VOLUME/(float)(1<<20)/(float)delta);
 		}
 	}
 

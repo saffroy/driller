@@ -7,12 +7,13 @@
 
 #include "log.h"
 #include "fdproxy.h"
+#include "fdproxy_internal.h"
 
 static int fdproxy_id;
 static int client_sock = -1;
 static int server_sock = -1;
 
-static int fdtable_hsize = 32;
+static int fdtable_hsize = FDTABLE_HSIZE_INIT;
 
 static void fdtable_init(void) {
 	assert(hcreate(fdtable_hsize) != 0);

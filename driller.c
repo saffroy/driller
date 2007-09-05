@@ -23,6 +23,7 @@
 #include <stdarg.h>
 
 #include "driller.h"
+#include "driller_internal.h"
 #include "log.h"
 #include "dlmalloc.h"
 
