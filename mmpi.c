@@ -310,16 +310,18 @@ void mmpi_send_driller_inval(int dest_rank,
 
 void mmpi_map_invalidate_cb(struct map_rec *map) {
 	struct driller_udata *udata;
+	struct fdkey *key;
 	int i;
 
-	dbg("invalidate: Ox%lx-0x%lx\n", map->start, map->end);
 	udata = map->user_data;
 	if(udata == NULL)
 		return;
-	fdproxy_client_invalidate_fd(&udata->key);
+	key = &udata->key;
+	dbg("invalidate <%d/%d>\n", key->pid, key->fd);
+	fdproxy_client_invalidate_fd(key);
 	for(i = 0; i < nprocs; i++)
 		if(udata->references[i])
-			;//xxx todo: revoke from siblings
+			mmpi_send_driller_inval(i, map, key);
 	driller_free(udata);
 }
 
@@ -448,6 +450,7 @@ static void mmpi_handle_ctrl(struct message *m) {
 	case MSG_DRILLER_INVAL:
 		map = &m->m_drill.map;
 		key = &m->m_drill.key;
+		dbg("driller_inval on <%d/%d>", key->pid, key->fd);
 		//xxx todo: remove map+fd from cache
 		break;
 	default:

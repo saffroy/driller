@@ -24,10 +24,10 @@ static void fdtable_add(int fd, struct fdkey *key) {
 	int len;
 	ENTRY e, *ep;
 
-	dbg("add <%d/%d:%d>", key->pid, key->fd, fd);
-
 	len = snprintf(buf, sizeof(buf), "%d/%d", key->pid, key->fd);
 	assert(len < sizeof(buf));
+
+	dbg("add <%s> = %d", buf, fd);
 
 	e.key = strdup(buf);
 	assert(e.key != NULL);
@@ -63,7 +63,7 @@ static int fdtable_lookup(struct fdkey *key) {
 		warn("cannot find '%s' in htable", buf);
 		fd = -1;
 	}
-	dbg("lookup %s = %d", buf, fd);
+	dbg("lookup <%s> = %d", buf, fd);
 	return fd;
 }
 
