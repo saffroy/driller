@@ -51,8 +51,10 @@ int main(int argc, char**argv) {
 	/* test stack */
 	printf("grow the stack a bit\n");
 	f(1000);
+#if 0
 	printf("try to exceed the stack limit\n");
 	f(8000);
+#endif
 
 	return 0;
 }

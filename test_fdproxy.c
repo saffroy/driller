@@ -44,8 +44,9 @@ int main(int argc, char**argv) {
 	} else {
 		mmpi_recv(0, &key1, &sz);
 		assert(sz == sizeof(key1));
-		fdproxy_set_key_id(&key2, 0x123);
 	}
+
+	mmpi_barrier();
 
 	if(rank != 0) {
 		int fd_out, fd_err;
@@ -57,6 +58,7 @@ int main(int argc, char**argv) {
 		printf("rank %d fetches new stdout\n", rank);
 		fd_out = fdproxy_client_get_fd(&key1);
 		printf("rank %d fetches new stderr\n", rank);
+		fdproxy_set_key_id(&key2, 0x123);
 		fd_err = fdproxy_client_get_fd(&key2);
 
 		new_out = fdopen(fd_out, "w");

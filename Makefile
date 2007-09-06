@@ -1,9 +1,11 @@
+#GCOV_FLAGS := -fprofile-arcs -ftest-coverage
+
 CC := gcc
-CFLAGS := -Wall -O0 -g
+CFLAGS := -Wall -O0 -g $(GCOV_FLAGS)
 CPPFLAGS := -D DEBUG -D _GNU_SOURCE
 
 LD := gcc
-LDFLAGS :=
+LDFLAGS := $(GCOV_FLAGS)
 
 progs := test_mmpi test_fdproxy test_driller test_dlmalloc
 libobjs :=  mmpi.o fdproxy.o driller.o dlmalloc.o
@@ -22,7 +24,7 @@ dlmalloc.o driller.o: CPPFLAGS += -D MSPACES
 test_driller test_mmpi test_fdproxy: LDFLAGS += -ldl
 
 clean:
-	$(RM) *.o $(progs)
+	$(RM) *.o $(progs) *.gcov *.gcda *.gcno core.*
 
 check: $(progs)
 	for p in $(progs); do \
