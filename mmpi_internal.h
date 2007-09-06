@@ -84,6 +84,7 @@ struct shmem {
 	volatile int driller_send_running;
 	struct message_queue free_q;
 	struct message_queue recv_q;
+	struct message_queue ctrl_q;
 	struct message msg_pool[MSG_POOL_SIZE];
 };
 

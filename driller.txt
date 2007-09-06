@@ -56,27 +56,32 @@ Details:
    a segment could be rebuilt only when a remote process needs access
    it could save memory, typically for data sections (and other private
    maps, which can be rare)
+   but this costs a full segment copy for the first remote access of
+   any segment, which is what we want to avoid
  * rodata
    non-writable segments need copying too (they can contain .rodata),
    unless the backing files can be found and mapped read-only
- * fully static linking?
-   should probably work, small differences:
-   init must be explicitely called
-   overloading will probably depend on link order
-   err... no: rtld_next can't be used!
+ * fully static linking? may work, but:
+   - overloading will probably depend on link order
+   - rtld_next can't be used! so overloaded syms should be called or rewritten
+   - possible symbol collisions
  * threads
    concurrent access
    stacks: multiple stacks, maybe special mmap flags
- * number of fds
-   there can be many, if needed they could be limited:
-   - heap can be reimplemented by overloading brk/sbrk
+   overload clone?
+ * increased number of open fds
+   there could be many, if needed they could be limited:
+   - heap can be reimplemented by overloading brk/sbrk (done)
    - a single fd for a fixed size large chunk (eg. 1MB) is easily managed with
      a bitmap, and when necessary, unused space can be reclaimed by copying
      then remapping used areas at the end of the file; this means these areas
-     must no longer be used by siblings... or maybe it's a silly idea
+     must no longer be used by siblings...
+     or maybe it's a silly idea: reclaiming scheme is intricate and costly,
+     yet memory must be reclaimed (this is what app/libs manifest explicitely)
  * fork
    may work by overloading it:
    switch to temp stack, do fork, and child resets driller maps
+   map cow? interesting but maybe not trivial
 
 Pros
  * can use regular debuggers

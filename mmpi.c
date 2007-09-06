@@ -17,6 +17,12 @@
 #include "mmpi_internal.h"
 
 
+static struct shmem *shmem;
+static int jobid;
+static int nprocs;
+static int rank;
+
+
 static inline void nop(void) {
 #if USE_SCHED_YIELD
 	sched_yield();
@@ -177,6 +183,12 @@ static inline void msg_queue_unlock(struct message_queue *q) {
 	spin_unlock(&q->q_lock);
 }
 
+static inline void msg_enqueue(struct message_queue *q, struct message *m) {
+	msg_queue_lock(q);
+	__msg_enqueue(q, m);
+	msg_queue_unlock(q);
+}
+
 static struct message *msg_dequeue_head(struct message_queue *q) {
 	struct message *m = NULL;
 
@@ -189,6 +201,20 @@ static struct message *msg_dequeue_head(struct message_queue *q) {
 		}
 		msg_queue_unlock(q);
 	} while(m == NULL);
+	return m;
+}
+
+static struct message *msg_dequeue_head_nonblock(struct message_queue *q) {
+	struct message *m = NULL;
+
+	msg_queue_lock(q);
+	if(!__msg_queue_empty(q)) {
+		m = list_entry(list_next(&q->q_list),
+			       struct message, m_list);
+		__msg_dequeue(q, m);
+	}
+	msg_queue_unlock(q);
+
 	return m;
 }
 
@@ -212,33 +238,21 @@ static struct message *msg_dequeue_from(struct message_queue *q, int src) {
 	return m;
 }
 
-static struct message *msg_dequeue_ctrl(struct message_queue *q) {
-	struct message *m = NULL;
-	struct list_head *p;
+static struct message *msg_alloc(void) {
+	struct shmem *my = shmem + rank;
 
-	msg_queue_lock(q);
-	list_for_each(p, &q->q_list) {
-		m = list_entry(p, struct message, m_list);
-		switch(m->m_type) {
-		case MSG_DRILLER_INVAL:
-			__msg_dequeue(q, m);
-			break;
-		default:
-			m = NULL;
-		}
-		if(m != NULL)
-			break;
-	}
-	msg_queue_unlock(q);
-	return m;
+	return msg_dequeue_head(&my->free_q);
+}
+
+static void msg_free(struct message *m) {
+	struct shmem *src = shmem + m->m_src;
+
+	msg_queue_lock(&src->free_q);
+	__msg_enqueue_head(&src->free_q, m);
+	msg_queue_unlock(&src->free_q);
 }
 
 /*****************/
-
-static struct shmem *shmem;
-static int jobid;
-static int nprocs;
-static int rank;
 
 static void mmpi_init_shmem(void) {
 	unsigned int page_size;
@@ -283,6 +297,7 @@ static void mmpi_init_shmem(void) {
 
 			msg_queue_init(&shm->free_q);
 			msg_queue_init(&shm->recv_q);
+			msg_queue_init(&shm->ctrl_q);
 			for(m = shm->msg_pool;
 			    m < shm->msg_pool + MSG_POOL_SIZE; m++) {
 				list_init(&m->m_list);
@@ -314,19 +329,16 @@ static void mmpi_init_shmem(void) {
 
 static void mmpi_send_driller_inval(int dest_rank,
 			     struct map_rec *map, struct fdkey *key) {
-	struct shmem *my = shmem + rank;
 	struct shmem *dest = shmem + dest_rank;
 	struct message *m;
 
-	m = msg_dequeue_head(&my->free_q);
+	m = msg_alloc();
 
 	m->m_type = MSG_DRILLER_INVAL;
 	memcpy(&m->m_drill.map, map, sizeof(*map));
 	memcpy(&m->m_drill.key, key, sizeof(*key));
 
-	msg_queue_lock(&dest->recv_q);
-	__msg_enqueue(&dest->recv_q, m);
-	msg_queue_unlock(&dest->recv_q);
+	msg_enqueue(&dest->ctrl_q, m);
 }
 
 static void mmpi_map_invalidate_cb(struct map_rec *map) {
@@ -383,22 +395,24 @@ static void mmpi_poll_ctrl(void) {
 	struct message *m;
 
 	for(;;) {
-		m = msg_dequeue_ctrl(&my->recv_q);
+		m = msg_dequeue_head_nonblock(&my->ctrl_q);
+
 		if(m == NULL)
 			return;
 		mmpi_handle_ctrl(m);
+
+		msg_free(m);
 	}
 }
 
 static void mmpi_send_frags(int dest_rank, void *buf, size_t size) {
-	struct shmem *my = shmem + rank;
 	struct shmem *dest = shmem + dest_rank;
 	struct message *m;
 	size_t remainder = size;
 	char *p = buf;
 
 	do {
-		m = msg_dequeue_head(&my->free_q);
+		m = msg_alloc();
 
 		m->m_size = min(remainder, MSG_PAYLOAD_SIZE_BYTES);
 		memcpy(m->m_payload, p, m->m_size);
@@ -406,9 +420,7 @@ static void mmpi_send_frags(int dest_rank, void *buf, size_t size) {
 		remainder -= m->m_size;
 		m->m_type = remainder ? MSG_FRAG : MSG_DATA;
 
-		msg_queue_lock(&dest->recv_q);
-		__msg_enqueue(&dest->recv_q, m);
-		msg_queue_unlock(&dest->recv_q);
+		msg_enqueue(&dest->recv_q, m);
 	} while(remainder > 0);
 }
 
@@ -442,7 +454,7 @@ static void mmpi_send_driller(int dest_rank, void *buf, size_t size) {
 	/* mark dest_rank as user of this map */
 	udata->references[dest_rank] = 1;
 
-	m = msg_dequeue_head(&my->free_q);
+	m = msg_alloc();
 
 	m->m_type = MSG_DRILLER;
 	memcpy(&m->m_drill.map, map, sizeof(*map));
@@ -454,9 +466,7 @@ static void mmpi_send_driller(int dest_rank, void *buf, size_t size) {
 	/* want to be notified of recv completion */
 	my->driller_send_running = 1;
 
-	msg_queue_lock(&dest->recv_q);
-	__msg_enqueue(&dest->recv_q, m);
-	msg_queue_unlock(&dest->recv_q);
+	msg_enqueue(&dest->recv_q, m);
 
 	/* wait for recv completion */
 	while(my->driller_send_running)
@@ -472,7 +482,7 @@ void mmpi_send(int dest_rank, void *buf, size_t size) {
 		mmpi_send_frags(dest_rank, buf, size);
 }
 
-void mmpi_recv_driller(int src_rank, void *buf, size_t *size,
+static void mmpi_recv_driller(int src_rank, void *buf, size_t *size,
 		       struct message *m) {
 	struct shmem *src = shmem + src_rank;
 	struct map_rec *map;
@@ -495,15 +505,14 @@ void mmpi_recv_driller(int src_rank, void *buf, size_t *size,
 
 void mmpi_recv(int src_rank, void *buf, size_t *size) {
 	struct shmem *my = shmem + rank;
-	struct shmem *src = shmem + src_rank;
 	struct message *m = NULL;
 	int last_frag = 0;
 	char *p = buf;
 
-//	mmpi_poll_ctrl(); // XXX serious performance hit !?
-
 	*size = 0;
 	do {
+		mmpi_poll_ctrl();
+
 		m = msg_dequeue_from(&my->recv_q, src_rank);
 
 		switch(m->m_type) {
@@ -519,16 +528,11 @@ void mmpi_recv(int src_rank, void *buf, size_t *size) {
 			mmpi_recv_driller(src_rank, buf, size, m);
 			last_frag = 1;
 			break;
-		case MSG_DRILLER_INVAL:
-			mmpi_handle_ctrl(m);
-			break;
 		default:
 			err("bad message type: %d", m->m_type);
 		}
 
-		msg_queue_lock(&src->free_q);
-		__msg_enqueue_head(&src->free_q, m);
-		msg_queue_unlock(&src->free_q);
+		msg_free(m);
 	} while(!last_frag);
 }
 
