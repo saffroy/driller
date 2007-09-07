@@ -15,17 +15,29 @@ static int server_sock = -1;
 
 static int fdtable_hsize = FDTABLE_HSIZE_INIT;
 
+static char keystr_buf[20];
+
 static void fdtable_init(void) {
-	assert(hcreate(fdtable_hsize) != 0);
+	int rc;
+
+	rc = hcreate(fdtable_hsize);
+	assert(rc != 0);
+}
+
+char *fdproxy_keystr(struct fdkey *key) {
+	int len;
+
+	len = snprintf(keystr_buf, sizeof(keystr_buf),
+		       "%d/%d", key->pid, key->fd);
+	assert(len < sizeof(keystr_buf));
+	return keystr_buf;
 }
 
 static void fdtable_add(int fd, struct fdkey *key) {
-	char buf[20];
-	int len;
+	char *buf;
 	ENTRY e, *ep;
 
-	len = snprintf(buf, sizeof(buf), "%d/%d", key->pid, key->fd);
-	assert(len < sizeof(buf));
+	buf = fdproxy_keystr(key);
 
 	dbg("add <%s> = %d", buf, fd);
 
@@ -47,20 +59,18 @@ static void fdtable_add(int fd, struct fdkey *key) {
 }
 
 static int fdtable_lookup(struct fdkey *key) {
-	char buf[20];
-	int len;
+	char *buf;
 	ENTRY e, *ep;
 	int fd;
 
-	len = snprintf(buf, sizeof(buf), "%d/%d", key->pid, key->fd);
-	assert(len < sizeof(buf));
+	buf = fdproxy_keystr(key);
 
 	e.key = buf;
 	ep = hsearch(e, FIND);
 	if(ep != NULL)
 		fd = (int)(long)ep->data;
 	else {
-		warn("cannot find '%s' in htable", buf);
+		dbg("cannot find '%s' in htable", buf);
 		fd = -1;
 	}
 	dbg("lookup <%s> = %d", buf, fd);

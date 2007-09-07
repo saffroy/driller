@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <sched.h>
 #include <assert.h>
+#include <search.h>
 
 #include "mmpi.h"
 #include "log.h"
@@ -21,7 +22,8 @@ static struct shmem *shmem;
 static int jobid;
 static int nprocs;
 static int rank;
-
+static struct hsearch_data map_cache;
+static int map_cache_hsize = MAP_CACHE_HSIZE_INIT;
 
 static inline void nop(void) {
 #if USE_SCHED_YIELD
@@ -254,76 +256,86 @@ static void msg_free(struct message *m) {
 
 /*****************/
 
-static void mmpi_init_shmem(void) {
-	unsigned int page_size;
-	unsigned int shmem_size;
-	int shmem_fd;
-	int i;
-	struct fdkey key;
+static void map_cache_add(struct map_cache *mc, struct fdkey *key) {
+	char *buf;
+	ENTRY e, *ep;
+	int rc;
 
-	shmem_size = nprocs*sizeof(*shmem);
-	page_size = sysconf(_SC_PAGESIZE);
-	shmem_size = (shmem_size + page_size - 1) & ~(page_size - 1);
-	fdproxy_set_key_id(&key, SHMEM_KEY_MAGIC);
+	buf = fdproxy_keystr(key);
 
-	if(rank == 0) {
-		char *filename;
-		int len;
+	dbg("add <%s> = %p", buf, mc);
 
-		/* create file */
-		len = snprintf(NULL, 0, "%s/mmpi_shmem-%d", TMPDIR, jobid);
-		filename = malloc(1+len);
-		sprintf(filename, "%s/mmpi_shmem-%d", TMPDIR, jobid);
+	e.key = strdup(buf);
+	assert(e.key != NULL);
+	e.data = mc;
+	rc = hsearch_r(e, ENTER, &ep, &map_cache);
+	if(rc == 0) {
+		/* retry with larger htable */
+		map_cache_hsize += map_cache_hsize/2;
+		if(hcreate_r(map_cache_hsize, &map_cache) == 0)
+			err("cannot grow htable (size=%d)",
+			    map_cache_hsize);
+		rc = hsearch_r(e, ENTER, &ep, &map_cache);
+		if(rc == 0)
+			err("cannot insert into htable (size=%d)",
+			    map_cache_hsize);
+	}
+}
 
-		shmem_fd = open(filename, O_CREAT|O_TRUNC|O_RDWR, 0600);
-		if(shmem_fd < 0)
-			perr("open");
-		if(unlink(filename) < 0)
-			perr("unlink");
-		free(filename);
-		if(ftruncate(shmem_fd, shmem_size))
-			perr("truncate");
-		dbg("allocated %d kB of shared mem", shmem_size/1024);
+static struct map_cache *map_cache_lookup(struct fdkey *key) {
+	char *buf;
+	ENTRY e, *ep;
+	int rc;
+	struct map_cache *mc;
 
-		shmem = mmap(NULL, shmem_size, PROT_READ|PROT_WRITE, 
-			     MAP_SHARED|MAP_NORESERVE, shmem_fd, 0);
-		if(shmem == (void*)-1)
-			perr("mmap");
+	buf = fdproxy_keystr(key);
 
-		/* initialize shmem */
-		for(i = 0; i < nprocs; i++) {
-			struct shmem *shm = shmem + i;
-			struct message *m;
-
-			msg_queue_init(&shm->free_q);
-			msg_queue_init(&shm->recv_q);
-			msg_queue_init(&shm->ctrl_q);
-			for(m = shm->msg_pool;
-			    m < shm->msg_pool + MSG_POOL_SIZE; m++) {
-				list_init(&m->m_list);
-				m->m_src = i;
-				__msg_enqueue(&shm->free_q, m);
-			}
-		}
-
-		/* now share it with siblings */
-		fdproxy_client_send_fd(shmem_fd, &key);
+	e.key = buf;
+	rc = hsearch_r(e, FIND, &ep, &map_cache);
+	if(ep != NULL) {
+		mc = ep->data;
 	} else {
-		/* retrieve fd for shmem created by rank 0 */
-		for(i = 0; i < CONNECT_TIMEOUT; i++) {
-			shmem_fd = fdproxy_client_get_fd(&key);
-			if(shmem_fd >= 0)
-				break;
-			sleep(1);
-		}
-		if(shmem_fd < 0)
-			err("could not retrieve shared mem fd after %d seconds",
-			    CONNECT_TIMEOUT);
+		dbg("cannot find '%s' in htable", buf);
+		mc = NULL;
+	}
+	dbg("lookup <%s> = %p", buf, mc);
+	return mc;
+}
 
-		shmem = mmap(NULL, shmem_size, PROT_READ|PROT_WRITE, 
-			     MAP_SHARED|MAP_NORESERVE, shmem_fd, 0);
-		if(shmem == (void*)-1)
-			perr("mmap");
+static struct map_cache *map_cache_install(struct map_rec *map,
+					   struct fdkey *key) {
+	struct map_cache *mc;
+
+	assert(map_cache_lookup(key) == NULL);
+
+	mc = malloc(sizeof(*mc));
+	assert(mc != NULL);
+	memcpy(&mc->map, map, sizeof(*map));
+	mc->address = driller_install_map(map);
+	map_cache_add(mc, key);
+
+	dbg("install <%s> @ %p", fdproxy_keystr(key), mc->address);
+	return mc;
+}
+
+static void map_cache_update(struct map_rec *map, struct fdkey *key,
+			     struct map_cache *mc) {
+	driller_remove_map(&mc->map, mc->address);
+	memcpy(&mc->map, map, sizeof(*map));
+	mc->address = driller_install_map(map);
+
+	dbg("update <%s> @ %p", fdproxy_keystr(key), mc->address);
+}
+
+static void map_cache_remove(struct fdkey *key) {
+	struct map_cache *mc;
+
+	mc = map_cache_lookup(key);
+	if(mc != NULL) {
+		map_cache_add(NULL, key);
+		driller_remove_map(&mc->map, mc->address);
+		close(mc->map.fd);
+		free(mc);
 	}
 }
 
@@ -350,7 +362,7 @@ static void mmpi_map_invalidate_cb(struct map_rec *map) {
 	if(udata == NULL)
 		return;
 	key = &udata->key;
-	dbg("invalidate <%d/%d>", key->pid, key->fd);
+	dbg("invalidate <%s>", fdproxy_keystr(key));
 	fdproxy_client_invalidate_fd(key);
 	for(i = 0; i < nprocs; i++)
 		if(udata->references[i])
@@ -358,48 +370,25 @@ static void mmpi_map_invalidate_cb(struct map_rec *map) {
 	driller_free(udata);
 }
 
-void mmpi_init(int jobid, int n, int r) {
-	nprocs = n;
-	rank = r;
-
-	if(rank == 0)
-		/* only rank 0 forks fdproxy daemon */
-		fdproxy_init(jobid, 1);
-	else
-		fdproxy_init(jobid, 0);
-
-	mmpi_init_shmem();
-	driller_init();
-	driller_register_map_invalidate_cb(mmpi_map_invalidate_cb);
-	mmpi_barrier();
-}
-
-static void mmpi_handle_ctrl(struct message *m) {
-	struct map_rec *map;
-	struct fdkey *key;
-
-	switch(m->m_type) {
-	case MSG_DRILLER_INVAL:
-		map = &m->m_drill.map;
-		key = &m->m_drill.key;
-		dbg("driller_inval on <%d/%d>", key->pid, key->fd);
-		//xxx todo: remove map+fd from cache
-		break;
-	default:
-		err("bad message type: %d", m->m_type);
-	}
-}
-
 static void mmpi_poll_ctrl(void) {
 	struct shmem *my = shmem + rank;
 	struct message *m;
+	struct fdkey *key;
 
 	for(;;) {
 		m = msg_dequeue_head_nonblock(&my->ctrl_q);
 
 		if(m == NULL)
 			return;
-		mmpi_handle_ctrl(m);
+		switch(m->m_type) {
+		case MSG_DRILLER_INVAL:
+			key = &m->m_drill.key;
+			dbg("driller_inval on <%s>", fdproxy_keystr(key));
+			map_cache_remove(key);
+			break;
+		default:
+			err("bad message type: %d", m->m_type);
+		}
 
 		msg_free(m);
 	}
@@ -487,16 +476,50 @@ static void mmpi_recv_driller(int src_rank, void *buf, size_t *size,
 	struct shmem *src = shmem + src_rank;
 	struct map_rec *map;
 	struct fdkey *key;
-	char *map_base;
+	struct map_cache *mc;
 
 	map = &m->m_drill.map;
 	key = &m->m_drill.key;
-	//xxx todo: cache map+fd locally
-	map->fd = fdproxy_client_get_fd(key);
-	assert(map->fd >= 0);
-	map_base = driller_install_map(map);
-	memcpy(buf, map_base + m->m_drill.offset, m->m_drill.length);
-	driller_remove_map(map, map_base);
+	mc = map_cache_lookup(key);
+	if(mc == NULL) {
+		map->fd = fdproxy_client_get_fd(key);
+		assert(map->fd >= 0);
+		mc = map_cache_install(map, key);
+	} else {
+		/*
+		 * a mapping exists already, but it may need a refresh
+		 * this is only required if the data we receive is not
+		 * contained in the mapping we already have
+		 *
+		 * this saves us two syscalls each time the mapping changes
+		 * while the data can still be found, which can be common
+		 * with the stack or the heap
+		 *
+		 * we compute offsets relative to the backing file
+		 */
+		off_t data_start, data_end;
+		off_t local_map_start, local_map_len, local_map_end;
+
+		data_start = map->offset + m->m_drill.offset;
+		data_end = data_start + m->m_drill.length;
+
+		local_map_start = mc->map.offset;
+		local_map_len = mc->map.end - mc->map.start;
+		local_map_end = local_map_start + local_map_len;
+
+		/* is data outside local map? */
+		if((data_start < local_map_start)
+		   || (data_start >= local_map_end)
+		   || (data_end <= local_map_start)
+		   || (data_end > local_map_end)) {
+			/* it is: need to update the mapping */
+			map_cache_update(map, key, mc);
+		} else {
+			/* it is not: need to fix the data offset */
+			m->m_drill.offset = data_start - local_map_start;
+		}
+	}
+	memcpy(buf, mc->address + m->m_drill.offset, m->m_drill.length);
 	*size += m->m_drill.length;
 
 	/* notify sender of recv completion */
@@ -564,4 +587,97 @@ void mmpi_barrier(void) {
 		set_box(0);
 	}
 	flip = !flip;
+}
+
+static void mmpi_init_shmem(void) {
+	unsigned int page_size;
+	unsigned int shmem_size;
+	int shmem_fd;
+	int i;
+	struct fdkey key;
+
+	shmem_size = nprocs*sizeof(*shmem);
+	page_size = sysconf(_SC_PAGESIZE);
+	shmem_size = (shmem_size + page_size - 1) & ~(page_size - 1);
+	fdproxy_set_key_id(&key, SHMEM_KEY_MAGIC);
+
+	if(rank == 0) {
+		char *filename;
+		int len;
+
+		/* create file */
+		len = snprintf(NULL, 0, "%s/mmpi_shmem-%d", TMPDIR, jobid);
+		filename = malloc(1+len);
+		sprintf(filename, "%s/mmpi_shmem-%d", TMPDIR, jobid);
+
+		shmem_fd = open(filename, O_CREAT|O_TRUNC|O_RDWR, 0600);
+		if(shmem_fd < 0)
+			perr("open");
+		if(unlink(filename) < 0)
+			perr("unlink");
+		free(filename);
+		if(ftruncate(shmem_fd, shmem_size))
+			perr("truncate");
+		dbg("allocated %d kB of shared mem", shmem_size/1024);
+
+		shmem = mmap(NULL, shmem_size, PROT_READ|PROT_WRITE, 
+			     MAP_SHARED|MAP_NORESERVE, shmem_fd, 0);
+		if(shmem == (void*)-1)
+			perr("mmap");
+
+		/* initialize shmem */
+		for(i = 0; i < nprocs; i++) {
+			struct shmem *shm = shmem + i;
+			struct message *m;
+
+			msg_queue_init(&shm->free_q);
+			msg_queue_init(&shm->recv_q);
+			msg_queue_init(&shm->ctrl_q);
+			for(m = shm->msg_pool;
+			    m < shm->msg_pool + MSG_POOL_SIZE; m++) {
+				list_init(&m->m_list);
+				m->m_src = i;
+				__msg_enqueue(&shm->free_q, m);
+			}
+		}
+
+		/* now share it with siblings */
+		fdproxy_client_send_fd(shmem_fd, &key);
+	} else {
+		/* retrieve fd for shmem created by rank 0 */
+		for(i = 0; i < CONNECT_TIMEOUT; i++) {
+			shmem_fd = fdproxy_client_get_fd(&key);
+			if(shmem_fd >= 0)
+				break;
+			sleep(1);
+		}
+		if(shmem_fd < 0)
+			err("could not retrieve shared mem fd after %d seconds",
+			    CONNECT_TIMEOUT);
+
+		shmem = mmap(NULL, shmem_size, PROT_READ|PROT_WRITE, 
+			     MAP_SHARED|MAP_NORESERVE, shmem_fd, 0);
+		if(shmem == (void*)-1)
+			perr("mmap");
+	}
+}
+
+void mmpi_init(int jobid, int n, int r) {
+	int rc;
+
+	nprocs = n;
+	rank = r;
+
+	if(rank == 0)
+		/* only rank 0 forks fdproxy daemon */
+		fdproxy_init(jobid, 1);
+	else
+		fdproxy_init(jobid, 0);
+
+	mmpi_init_shmem();
+	driller_init();
+	driller_register_map_invalidate_cb(mmpi_map_invalidate_cb);
+	rc = hcreate_r(map_cache_hsize, &map_cache);
+	assert(rc != 0);
+	mmpi_barrier();
 }

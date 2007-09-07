@@ -16,10 +16,12 @@ void f(int n) {
 		f(n-1);
 }
 
-void map_invalidate(struct map_rec *map) {
+#ifndef NODRILL
+static void map_invalidate(struct map_rec *map) {
 	printf("map invalidate: Ox%lx-0x%lx\n",
 	       map->start, map->end);
 }
+#endif
 
 int main(int argc, char**argv) {
 	int i;
@@ -56,5 +58,6 @@ int main(int argc, char**argv) {
 	f(8000);
 #endif
 
+	printf("SUCCESS! exiting\n");
 	return 0;
 }

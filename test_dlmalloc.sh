@@ -1,5 +1,5 @@
 #!/bin/bash
 set -x
 
-./test_driller
+./test_dlmalloc
 

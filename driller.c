@@ -151,6 +151,7 @@ static int map_cmp(const void *a, const void *b) {
 static void map_record(off_t start, off_t end, int prot, off_t offset,
 		       char *path, int fd) {
 	struct map_rec *map;
+	void *rc;
 
 	if(strcmp(path, "[vdso]") == 0)
 		/* ignore gate page */
@@ -181,7 +182,8 @@ static void map_record(off_t start, off_t end, int prot, off_t offset,
 	assert(map->path != NULL);
 	map->fd = fd;
 
-	assert(tsearch((void *)map, &map_root, map_cmp) != NULL);
+	rc = tsearch((void *)map, &map_root, map_cmp);
+	assert(rc != NULL);
 }
 
 static void map_parse(void)
@@ -204,7 +206,8 @@ static void map_parse(void)
 	if(read(fd, buf, sizeof(buf)) < 0)
 		perr("read");
 	/* make sure we've read the whole thing */
-	assert(read(fd, buf, sizeof(buf)) == 0);
+	if(read(fd, buf, sizeof(buf)) != 0)
+		err("could not read %s entirely", file);
 	close(fd);
 
 	line = buf;
@@ -328,6 +331,7 @@ static void segv_sigaction(int signum, siginfo_t *si, void *uctx) {
 	map_stack->start = min((addr & ~((unsigned long)page_size - 1)),
 			       map_stack->start - STACK_MIN_GROW);
 	size = map_stack->end - map_stack->start;
+	map_stack->offset = STACK_MAP_OFFSET - size;
 
 	if(getrlimit(RLIMIT_STACK, &rl) != 0)
 		perr("getrlimit");
@@ -338,7 +342,7 @@ static void segv_sigaction(int signum, siginfo_t *si, void *uctx) {
 
 	rc = mmap((void*)map_stack->start, size, map_stack->prot,
 		  MAP_SHARED | MAP_FIXED, map_stack->fd,
-		  STACK_MAP_OFFSET - size);
+		  map_stack->offset);
 	if(rc == MAP_FAILED)
 		perr("mmap");
 	dbg("stack grows to %lx", map_stack->start);
@@ -470,8 +474,10 @@ static void map_invalidate_range(off_t start, off_t end) {
 		if( (start <= map->start)
 		    && (map->end <= end) ) {
 			/* map has disappeared completely */
+			void *rc;
 
-			assert(tdelete(map, &map_root, map_cmp) != NULL);
+			rc = tdelete(map, &map_root, map_cmp);
+			assert(rc != NULL);
 
 			/* make sure memory is released *now* */
 			if(ftruncate(map->fd, 0) != 0)
@@ -612,11 +618,15 @@ do_remap:
 		map->end = map->start + new_size;
 	else {
 		/* need to reinsert map to keep the map tree sorted */
+		void *rc;
+
 		driller_malloc_install();
-		assert(tdelete(map, &map_root, map_cmp) != NULL);
+		rc = tdelete(map, &map_root, map_cmp);
+		assert(rc != NULL);
 		map->start = (off_t)rc;
 		map->end = map->start + new_size;
-		assert(tsearch((void *)map, &map_root, map_cmp) != NULL);
+		rc = tsearch((void *)map, &map_root, map_cmp);
+		assert(rc != NULL);
 		driller_malloc_restore();
 	}
 

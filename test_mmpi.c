@@ -7,7 +7,7 @@
 #include "mmpi.h"
 #include "log.h"
 
-#define THRTEST_CHUNK_SIZE (1 << 26) /* 64 MB */
+#define THRTEST_CHUNK_SIZE (1 << 24) /* 16 MB */
 #define THRTEST_VOLUME (1 << 30) /* 1 GB */
 #define THRTEST_CHUNK_COUNT (THRTEST_VOLUME/THRTEST_CHUNK_SIZE)
 
@@ -111,10 +111,10 @@ int main(int argc, char**argv) {
 	} else {
 		int i, j;
 		struct timeval tv1, tv2;
-		long delta;
+		float delta;
 
-		printf("now time send/recv throughput (%d MB)...\n", 
-		       THRTEST_VOLUME/(1<<20));
+		printf("now time send/recv throughput (%d MB in %dkB chunks)...\n", 
+		       THRTEST_VOLUME >> 20, THRTEST_CHUNK_SIZE >> 10);
 		gettimeofday(&tv1, NULL);
 
 		for(j = 1; j < nprocs; j++) {
@@ -129,10 +129,11 @@ int main(int argc, char**argv) {
 			}
 		}
 		gettimeofday(&tv2, NULL);
-		delta = (tv2.tv_usec - tv1.tv_usec) / 1000000
-			+ (tv2.tv_sec - tv1.tv_sec);
-		printf("average send/recv throughput: %.2f MB/s\n",
-		       (float)((nprocs-1) * THRTEST_VOLUME >> 20) / (float)delta);
+		delta = (float)(tv2.tv_usec - tv1.tv_usec) / 1000000
+			+ (float)(tv2.tv_sec - tv1.tv_sec);
+		printf("average send/recv throughput: %.2f MB/s (%.2fs)\n",
+		       (float)((nprocs-1) * THRTEST_VOLUME >> 20) / delta,
+		       delta);
 	}
 	free(buf);
 

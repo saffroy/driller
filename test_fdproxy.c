@@ -27,9 +27,9 @@ int main(int argc, char**argv) {
 	/* fdproxy already initialized by mmpi_init */
 
 	/* let siblings duplicate stdout/stderr from rank 0
-	 * for stdout we have fdproxy make the fd key,
+	 * - for stdout we have fdproxy make the fd key,
 	 *   and we send it to siblings
-	 * for stderr we use a "well-known" key id
+	 * - for stderr we use a "well-known" key id
 	 */
 	if(rank == 0) {
 		printf("rank 0 sends stdout\n");
