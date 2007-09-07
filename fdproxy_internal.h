@@ -9,7 +9,7 @@
  * request FD_NEW_KEY
  *  notify proxy of new (fd,key) pair
  *  followed by FD_ADD_KEY which has ancillary fd
- *  no response
+ *   response: FD_ADD_KEY_ACK
  *
  * request FD_REQ_KEY
  *  ask for fd matching given key
@@ -24,6 +24,7 @@
 enum fdproxy_reqtype {
 	FD_NEW_KEY,
 	FD_ADD_KEY,
+	FD_ADD_KEY_ACK,
 	FD_REQ_KEY,
 	FD_RSP_KEYFOUND,
 	FD_RSP_KEY,
@@ -43,11 +44,14 @@ struct fdproxy_request {
  *  client has sent FD_NEW_KEY, expect FD_ADD_KEY
  * STATE_RCV_REQ_KEY
  *  client has sent FD_REQ_KEY, need to send FD_RSP_{KEYFOUND,KEY,NOKEY}
+ * STATE_RCV_ADD_KEY
+ *  client has sent FD_ADD_KEY, need to send FD_ADD_KEY_ACK
  */
 
 enum conn_state {
 	STATE_IDLE,
 	STATE_RCV_NEW_KEY,
+	STATE_RCV_ADD_KEY,
 	STATE_RCV_REQ_KEY,
 };
 struct connection_context {

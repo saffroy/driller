@@ -1,15 +1,17 @@
 # (Un)comment the lines below if needed
 #GCOV_FLAGS := -fprofile-arcs -ftest-coverage -O0
-#DEBUG_FLAGS := -D DEBUG -U NDEBUG -O0
+#DEBUG_FLAGS := -D DEBUG -O0
+DEBUG_FLAGS := -D DEBUG
+ASSERT_FLAGS := -D NDEBUG
 
 CC := gcc
 CFLAGS := -Wall -O3 -g $(GCOV_FLAGS)
-CPPFLAGS := -D _GNU_SOURCE -D NDEBUG $(DEBUG_FLAGS)
+CPPFLAGS := -D _GNU_SOURCE $(DEBUG_FLAGS) $(ASSERT_FLAGS)
 
 LD := gcc
 LDFLAGS := $(GCOV_FLAGS)
 
-progs := test_mmpi test_fdproxy test_driller test_dlmalloc
+progs := test_mmpi test_fdproxy test_driller test_dlmalloc test_spinlock
 libobjs :=  mmpi.o fdproxy.o driller.o dlmalloc.o
 
 all: $(progs)
@@ -18,6 +20,7 @@ test_mmpi: test_mmpi.o $(libobjs)
 test_fdproxy: test_fdproxy.o $(libobjs)
 test_driller: test_driller.o driller.o dlmalloc.o
 test_dlmalloc: test_dlmalloc.o dlmalloc.o
+test_spinlock: test_spinlock.o
 
 test_%.o: CPPFLAGS += -U NDEBUG
 test_dlmalloc.o: CPPFLAGS += -D NODRILL
@@ -30,6 +33,7 @@ clean:
 	$(RM) *.o $(progs) *.gcov *.gcda *.gcno core.*
 
 check: $(progs)
+	set -x; \
 	for p in $(progs); do \
 		sh $$p.sh ; \
 	done

@@ -3,7 +3,6 @@
 
 #define CONNECT_TIMEOUT 5 /* seconds */
 #define USE_TMPFS 1
-#define USE_SCHED_YIELD 1
 #define CACHELINE_ALIGN 64
 #define MAP_CACHE_HSIZE_INIT 32
 
@@ -30,18 +29,6 @@ struct list_head {
 };
 
 /*
- * spinlocks
- */
-
-#define LOCK_MAGIC 0xf0010c4
-struct spinlock {
-#ifndef NDEBUG
-	int magic;
-#endif
-	volatile unsigned int lck;
-};
-
-/*
  * shared mem and messages
  */
 
@@ -50,6 +37,7 @@ struct spinlock {
 #define __cacheline_aligned __attribute__((__aligned__(CACHELINE_ALIGN)))
 
 enum msg_type {
+	MSG_FREE          = -1,
 	MSG_DATA          = 0,
 	MSG_FRAG          = 1,
 	MSG_DRILLER       = 2,

@@ -7,7 +7,6 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <fcntl.h>
-#include <sched.h>
 #include <assert.h>
 #include <search.h>
 
@@ -15,6 +14,7 @@
 #include "log.h"
 #include "fdproxy.h"
 #include "driller.h"
+#include "spinlock.h"
 #include "mmpi_internal.h"
 
 
@@ -24,16 +24,6 @@ static int nprocs;
 static int rank;
 static struct hsearch_data map_cache;
 static int map_cache_hsize = MAP_CACHE_HSIZE_INIT;
-
-static inline void nop(void) {
-#if USE_SCHED_YIELD
-	sched_yield();
-#elif __x86_64__ || __i386__
-	asm volatile("rep; nop" : : ); // XXX not sure it's a pause on x64
-#else
-	/* nop */
-#endif
-}
 
 /*****************/
 
@@ -115,40 +105,6 @@ static inline int list_empty(struct list_head *head) {
 
 #define list_for_each(pos, head) \
 	for(pos = list_next(head); pos != head; pos = list_next(pos))
-
-/*****************/
-
-static void spin_lock_init(struct spinlock *lock) {
-#ifndef NDEBUG
-	lock->magic = LOCK_MAGIC;
-#endif
-	lock->lck = 1;
-}
-
-static inline int spin_trylock(struct spinlock *lock) {
-	int oldval;
-
-#if __x86_64__ || __i386__ 
-	asm volatile(
-		"xchgl %0,%1"
-		:"=q" (oldval), "=m" (lock->lck)
-		:"0" (0) : "memory");
-#else
-#error function spin_trylock needs porting to your architecture!
-#endif
-        return oldval > 0;
-}
-
-static inline void spin_lock(struct spinlock *lock) {
-	assert(lock->magic == LOCK_MAGIC);
-	while(!spin_trylock(lock))
-		nop();
-}
-
-static inline void spin_unlock(struct spinlock *lock) {
-	assert(lock->magic == LOCK_MAGIC);
-	lock->lck = 1;
-}
 
 /*****************/
 
@@ -249,6 +205,7 @@ static struct message *msg_alloc(void) {
 static void msg_free(struct message *m) {
 	struct shmem *src = shmem + m->m_src;
 
+	m->m_type = MSG_FREE;
 	msg_queue_lock(&src->free_q);
 	__msg_enqueue_head(&src->free_q, m);
 	msg_queue_unlock(&src->free_q);
@@ -387,7 +344,7 @@ static void mmpi_poll_ctrl(void) {
 			map_cache_remove(key);
 			break;
 		default:
-			err("bad message type: %d", m->m_type);
+			err("bad message type: %d in msg %p", m->m_type, m);
 		}
 
 		msg_free(m);
@@ -552,7 +509,7 @@ void mmpi_recv(int src_rank, void *buf, size_t *size) {
 			last_frag = 1;
 			break;
 		default:
-			err("bad message type: %d", m->m_type);
+			err("bad message type: %d in msg %p", m->m_type, m);
 		}
 
 		msg_free(m);
@@ -636,6 +593,7 @@ static void mmpi_init_shmem(void) {
 			for(m = shm->msg_pool;
 			    m < shm->msg_pool + MSG_POOL_SIZE; m++) {
 				list_init(&m->m_list);
+				m->m_type = MSG_FREE;
 				m->m_src = i;
 				__msg_enqueue(&shm->free_q, m);
 			}

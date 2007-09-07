@@ -188,6 +188,16 @@ static int fdproxy_server_get_fd(int sock, struct fdkey *key) {
 	return fd;
 }
 
+static void fdproxy_server_get_fd_ack(int sock, struct fdkey *key) {
+	struct fdproxy_request req;
+
+	/* send ack to FD_ADD_KEY */
+	req.magic = REQUEST_MAGIC;
+	req.key = *key;
+	req.type = FD_ADD_KEY_ACK;
+	send_request(sock, &req, sizeof(req), NULL, 0);
+}
+
 static void fdproxy_server_send_fd(int sock, int fd, struct fdkey *key) {
 	struct fdproxy_request req;
 
@@ -234,7 +244,7 @@ static void fdproxy_handle_in(struct connection_context *cl) {
 	case STATE_RCV_NEW_KEY:
 		fd = fdproxy_server_get_fd(cl->sock, &cl->rcvd_key);
 		fdtable_add(fd, &cl->rcvd_key);
-		cl->state = STATE_IDLE;
+		cl->state = STATE_RCV_ADD_KEY;
 		break;
 
 	default:
@@ -249,6 +259,11 @@ static void fdproxy_handle_out(struct connection_context *cl) {
 	case STATE_RCV_REQ_KEY:
 		fd = fdtable_lookup(&cl->rcvd_key);
 		fdproxy_server_send_fd(cl->sock, fd, &cl->rcvd_key);
+		cl->state = STATE_IDLE;
+		memset(&cl->rcvd_key, 0, sizeof(cl->rcvd_key));
+		break;
+	case STATE_RCV_ADD_KEY:
+		fdproxy_server_get_fd_ack(cl->sock, &cl->rcvd_key);
 		cl->state = STATE_IDLE;
 		memset(&cl->rcvd_key, 0, sizeof(cl->rcvd_key));
 		break;
@@ -274,6 +289,12 @@ void fdproxy_client_send_fd(int fd, struct fdkey *key) {
 	/* send fd proper */
 	req.type = FD_ADD_KEY;
 	send_request(client_sock, &req, sizeof(req), &fd, 1);
+
+	/* receive ack */
+	rcv_request(client_sock, &req, sizeof(req), NULL, 0);
+	assert(req.magic == REQUEST_MAGIC);
+	assert(memcmp(&req.key, key, sizeof(*key)) == 0);
+	assert(req.type == FD_ADD_KEY_ACK);
 }
 
 int fdproxy_client_get_fd(struct fdkey *key) {
@@ -356,6 +377,7 @@ static void fdproxy_daemon(void) {
 				ctx_pollfd[nactive].events = POLLIN;
 				break;
 			case STATE_RCV_REQ_KEY:	/* need to send response */
+			case STATE_RCV_ADD_KEY:	/* need to send ack */
 				ctx_pollfd[nactive].events = POLLOUT;
 				break;
 			}
