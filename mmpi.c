@@ -17,7 +17,6 @@
 #include "spinlock.h"
 #include "mmpi_internal.h"
 
-
 static struct shmem *shmem;
 static int jobid;
 static int nprocs;
@@ -198,8 +197,11 @@ static struct message *msg_dequeue_from(struct message_queue *q, int src) {
 
 static struct message *msg_alloc(void) {
 	struct shmem *my = shmem + rank;
+	struct message *m;
 
-	return msg_dequeue_head(&my->free_q);
+	m = msg_dequeue_head(&my->free_q);
+	assert(m->m_type == MSG_FREE);
+	return m;
 }
 
 static void msg_free(struct message *m) {
@@ -297,7 +299,7 @@ static void map_cache_remove(struct fdkey *key) {
 }
 
 static void mmpi_send_driller_inval(int dest_rank,
-			     struct map_rec *map, struct fdkey *key) {
+				    struct map_rec *map, struct fdkey *key) {
 	struct shmem *dest = shmem + dest_rank;
 	struct message *m;
 
@@ -321,6 +323,7 @@ static void mmpi_map_invalidate_cb(struct map_rec *map) {
 	key = &udata->key;
 	dbg("invalidate <%s>", fdproxy_keystr(key));
 	fdproxy_client_invalidate_fd(key);
+	/* notify users of this map */
 	for(i = 0; i < nprocs; i++)
 		if(udata->references[i])
 			mmpi_send_driller_inval(i, map, key);
@@ -393,6 +396,7 @@ static void mmpi_send_driller(int dest_rank, void *buf, size_t size) {
 		map->user_data = udata;
 		key = &udata->key;
 		fdproxy_client_send_fd(map->fd, key);
+		memset(udata->references, 0, nprocs);
 	} else {
 		udata = map->user_data;
 		key = &udata->key;
@@ -422,14 +426,14 @@ static void mmpi_send_driller(int dest_rank, void *buf, size_t size) {
 void mmpi_send(int dest_rank, void *buf, size_t size) {
 	mmpi_poll_ctrl();
 
-	if(size >= MSG_SIZE_THRESHOLD)
+	if(size >= MSG_DRILLER_SIZE_THRESHOLD)
 		mmpi_send_driller(dest_rank, buf, size);
 	else
 		mmpi_send_frags(dest_rank, buf, size);
 }
 
 static void mmpi_recv_driller(int src_rank, void *buf, size_t *size,
-		       struct message *m) {
+			      struct message *m) {
 	struct shmem *src = shmem + src_rank;
 	struct map_rec *map;
 	struct fdkey *key;

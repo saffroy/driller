@@ -8,7 +8,7 @@
 
 #define MSG_PAYLOAD_SIZE_BYTES 4096
 #define MSG_POOL_SIZE 1024
-#define MSG_SIZE_THRESHOLD (1<<17) /* 128kB */
+#define MSG_DRILLER_SIZE_THRESHOLD (1<<17) /* 128kB */
 
 #if USE_TMPFS
 #define TMPDIR "/dev/shm"

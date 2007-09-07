@@ -15,7 +15,6 @@ int main(int argc, char **argv) {
 	struct spinlock *lock;
 	long bufsz;
 	int i, j;
-	long sum;
 	int rc;
 
 	mem = mmap(NULL, SHM_SIZE, PROT_READ|PROT_WRITE,
@@ -43,12 +42,8 @@ int main(int argc, char **argv) {
 	else
 		_exit(0);
 
-	sum = 0;
 	for(i = 0; i < bufsz; i++)
-		sum += buf[i];
-	printf("sum: expect %ld got %ld\n",
-	       2 * LOOPS * bufsz, sum);
-	assert(sum == 2 * LOOPS * bufsz);
+		assert(buf[i] = 2 * LOOPS);
 
 	return 0;
 }

@@ -42,10 +42,10 @@ struct fdproxy_request {
  *  client has nothing in progress, expect anything
  * STATE_RCV_NEW_KEY
  *  client has sent FD_NEW_KEY, expect FD_ADD_KEY
- * STATE_RCV_REQ_KEY
- *  client has sent FD_REQ_KEY, need to send FD_RSP_{KEYFOUND,KEY,NOKEY}
  * STATE_RCV_ADD_KEY
  *  client has sent FD_ADD_KEY, need to send FD_ADD_KEY_ACK
+ * STATE_RCV_REQ_KEY
+ *  client has sent FD_REQ_KEY, need to send FD_RSP_{KEYFOUND,KEY,NOKEY}
  */
 
 enum conn_state {

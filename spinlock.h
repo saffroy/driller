@@ -1,14 +1,10 @@
 #ifndef SPINLOCK_H
 #define SPINLOCK_H
 
-#define USE_SCHED_YIELD 0
+#define USE_SCHED_YIELD 1
 
 #ifdef USE_SCHED_YIELD
 #include <sched.h>
-#endif
-
-#ifndef NDEBUG
-#include <assert.h>
 #endif
 
 /*
@@ -63,7 +59,15 @@ static inline void spin_lock(struct spinlock *lock) {
 
 static inline void spin_unlock(struct spinlock *lock) {
 	assert(lock->magic == LOCK_MAGIC);
-	lock->lck = 1;
+//	lock->lck = 1; //xxx does not work, dunno why???
+#if __x86_64__ || __i386__ 
+	asm volatile("movl $1,%0"
+		     :"=m" (lock->lck)
+		     :
+		     : "memory");
+#else
+#error function spin_unlock needs porting to your architecture!
+#endif
 }
 
 #endif /* SPINLOCK_H */
