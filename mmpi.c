@@ -328,6 +328,7 @@ static void mmpi_map_invalidate_cb(struct map_rec *map) {
 		if(udata->references[i])
 			mmpi_send_driller_inval(i, map, key);
 	driller_free(udata);
+	map->user_data = NULL;
 }
 
 static void mmpi_poll_ctrl(void) {
@@ -448,13 +449,16 @@ static void mmpi_recv_driller(int src_rank, void *buf, size_t *size,
 		mc = map_cache_install(map, key);
 	} else {
 		/*
-		 * a mapping exists already, but it may need a refresh
-		 * this is only required if the data we receive is not
-		 * contained in the mapping we already have
+		 * a mapping exists already, but it may need an update,
+		 * since we don't invalidate a map in a sibling until 
+		 * it is destroyed in its home process
 		 *
-		 * this saves us two syscalls each time the mapping changes
-		 * while the data can still be found, which can be common
-		 * with the stack or the heap
+		 * the update is only required if the data we will read is
+		 * not contained in the mapping we already have
+		 *
+		 * update costs two syscalls, but with the stack or the heap,
+		 * it will be common to find the data even with a slightly
+		 * stale mapping
 		 *
 		 * we compute offsets relative to the backing file
 		 */

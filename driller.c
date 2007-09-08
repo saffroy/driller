@@ -167,6 +167,11 @@ static void map_record(off_t start, off_t end, int prot, off_t offset,
 	if(strncmp(path, "/dev/", strlen("/dev/")) == 0)
 		/* special files are not welcome */
 		return;
+#if __x86_64__
+	if(offset > (2L << 40))
+		/* some strange offsets in /proc/self/maps */
+		offset = 0;
+#endif
 
 	/* now we have something to do */
 
@@ -268,9 +273,8 @@ static void map_overload_stack(void) {
 	size = map_stack->end - map_stack->start;
 
 	/* the new stack is at the end of a large sparse file */
-	if(ftruncate(map_stack->fd, STACK_MAP_OFFSET) != 0)
-		perr("ftruncate");
-	if(lseek(map_stack->fd, STACK_MAP_OFFSET - size, SEEK_SET) < 0)
+	map_stack->offset = STACK_MAP_OFFSET - size;
+	if(lseek(map_stack->fd, map_stack->offset, SEEK_SET) < 0)
 		perr("lseek");
 
 	/* copy mapped area to file */
@@ -282,7 +286,7 @@ static void map_overload_stack(void) {
 
 	map_overload((void*)map_stack->start, size, map_stack->prot,
 		     MAP_SHARED | MAP_FIXED, map_stack->fd,
-		     STACK_MAP_OFFSET - size, 0);
+		     map_stack->offset, 0);
 	dbg("remapped stack at %lx", map_stack->start);
 }
 
@@ -419,6 +423,8 @@ static void map_rebuild(struct map_rec *map, int index) {
 		size = map->end - map->start;
 
 		/* copy mapped area to file */
+		if(lseek(map->fd, map->offset, SEEK_SET) < 0)
+			perr("lseek");
 		rc = write(map->fd, (char*)map->start, size);
 		if(rc < 0)
 			perr("write");
@@ -427,7 +433,7 @@ static void map_rebuild(struct map_rec *map, int index) {
 
 		/* map file over original area */
 		map_overload((void*)map->start, size, map->prot,
-			     MAP_SHARED | MAP_FIXED, map->fd, 0,
+			     MAP_SHARED | MAP_FIXED, map->fd, map->offset,
 			     (type == OVERLOAD_HEAP) );
 		break;
 
@@ -461,11 +467,11 @@ static void map_rebuild(struct map_rec *map, int index) {
 static void map_invalidate_range(off_t start, off_t end) {
 	struct map_rec *map;
 
+	/* loop over all maps that intersect with [start-end] */
 	while(1) {
 		map = driller_lookup_map((void*)start, (size_t)(end-start));
 		if(map == NULL)
 			return;
-		/* map shares an interval with [start-end] */
 
 		/* notify user of the end of this map as it knows it */
 		if(map_invalidate_cb != NULL)
@@ -486,22 +492,30 @@ static void map_invalidate_range(off_t start, off_t end) {
 			close(map->fd);
 			free(map->path);
 			free(map);
-		} else {
-			/* map needs trimming */
-			if(start <= map->start) {
-				off_t new_start;
-
-				/* trim the start */
-				new_start = min(end, map->end);
-				map->offset += new_start - map->start;
-				map->start = new_start;
-			} else if(map->end <= end) {
-				/* trim the end */
-				map->end = max(start, map->start);
-			}
+			continue;
 		}
+
+		/* map needs trimming */
+		if(start <= map->start) {
+			off_t new_start;
+
+			/* trim the start */
+			new_start = min(end, map->end);
+			map->offset += new_start - map->start;
+			map->start = new_start;
+		} else if(map->end <= end) {
+			/* trim the end */
+			map->end = max(start, map->start);
+			if(ftruncate(map->fd,
+				     map->offset + map->end - map->start) != 0)
+				perr("ftruncate");
+		} else
+			/* we should split the map!
+			 * this can be done but seems very unlikely */
+			err("unexpected condition: should split mapping");
 	}
 }
+
 
 /******************/
 
@@ -523,7 +537,7 @@ void *mmap(void *start, size_t length, int prot, int flags,
 	driller_malloc_install();
 
 	fd = map_create_fd("%s/shmem-%d-anon", TMPDIR, getpid());
-	if(ftruncate(fd, length) != 0)
+	if(ftruncate(fd, offset + length) != 0)
 		goto out_close;
 
 	new_flags = (flags & ~(MAP_ANONYMOUS|MAP_PRIVATE)) | MAP_SHARED;
@@ -584,7 +598,7 @@ void * mremap(void *old_address, size_t old_size ,
 		goto out;
 	}
 
-	/* flags other than MAYMOBE are not handled yet (extra arg) */
+	/* flags other than MAYMOVE are not handled yet (extra arg) */
 	assert((flags & ~MREMAP_MAYMOVE) == 0);
 
 	/* identify affected mapping */
@@ -609,7 +623,7 @@ do_remap:
 	}
 
 	/* file size must agree with mapping size */
-	if(ftruncate(map->fd, new_size) != 0)
+	if(ftruncate(map->fd, map->offset + new_size) != 0)
 		perr("ftruncate");
 
 	/* update map */

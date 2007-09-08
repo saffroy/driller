@@ -31,10 +31,11 @@ Details:
     simply using any external malloc that uses mmap should be enough
     candidates: hoard (big C++ thing), dlmalloc (simpler, public domain)
     to be able to perform allocations while in mmap/brk called by malloc,
-    use a separate memory pool (dlmalloc rewlz)
+     use a separate memory pool (dlmalloc makes this easy)
    better to overload brk:
     heap can no longer grow, malloc uses mmap
-    thus overloading brk saves the creation of many small mmaps
+    thus overloading brk with calls to mmap/ftruncate saves the creation 
+     of many small mmaps
    need to overload mmap:
     anonymous memory becomes shared temp file
     shared files remain shared
