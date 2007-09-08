@@ -1,18 +1,17 @@
 # (Un)comment the lines below if needed
 #GCOV_FLAGS := -fprofile-arcs -ftest-coverage -O0
-#DEBUG_FLAGS := -D DEBUG -O0
-DEBUG_FLAGS := -D DEBUG
+#DEBUG_FLAGS := -O0 -D DEBUG
 ASSERT_FLAGS := -D NDEBUG
 
 CC := gcc
-CFLAGS := -Wall -O3 -g $(GCOV_FLAGS)
-CPPFLAGS := -D _GNU_SOURCE $(DEBUG_FLAGS) $(ASSERT_FLAGS)
+CFLAGS := -Wall -O3 -g $(GCOV_FLAGS) $(DEBUG_FLAGS)
+CPPFLAGS := -D _GNU_SOURCE $(NDEBUG_FLAGS) $(ASSERT_FLAGS)
 
 LD := gcc
 LDFLAGS := $(GCOV_FLAGS)
 
 progs := test_mmpi test_fdproxy test_driller test_dlmalloc test_spinlock
-libobjs :=  mmpi.o fdproxy.o driller.o dlmalloc.o
+libobjs :=  mmpi.o fdproxy.o driller.o dlmalloc.o map_cache.o
 
 all: $(progs)
 

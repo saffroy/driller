@@ -530,30 +530,31 @@ void *mmap(void *start, size_t length, int prot, int flags,
 	   || !(prot & PROT_READ) ) {
 		rc = old_mmap(start, length, prot, flags, fd, offset);
 		errno_sav = errno;
-		goto out_ret;
+		goto out;
 	}
-	//XXX todo: handle non anonymous maps?
 
 	driller_malloc_install();
 
 	fd = map_create_fd("%s/shmem-%d-anon", TMPDIR, getpid());
-	if(ftruncate(fd, offset + length) != 0)
-		goto out_close;
+	if(ftruncate(fd, offset + length) != 0) {
+		errno_sav = errno;
+		close(fd);
+		goto out;
+	}
 
 	new_flags = (flags & ~(MAP_ANONYMOUS|MAP_PRIVATE)) | MAP_SHARED;
 	rc = old_mmap(start, length, prot, new_flags, fd, offset);
-	if(rc != MAP_FAILED) {
-		map_invalidate_range((off_t)rc, (off_t)rc + length);
-		map_record((off_t)rc, (off_t)rc + length, prot, offset, "", fd);
-	}
-out_close:
+	errno_sav = errno;
 	if(rc == MAP_FAILED) {
-		errno_sav = errno;
 		close(fd);
+		goto out;
 	}
 
+	map_invalidate_range((off_t)rc, (off_t)rc + length);
+	map_record((off_t)rc, (off_t)rc + length, prot, offset, "", fd);
+out:
 	driller_malloc_restore();
-out_ret:
+
 	dbg("mmap(%p, %ld, 0x%x, 0x%x, %d, %ld) = %p %s",
 	    start, length, prot, flags, fd, offset, rc,
 	    rc == MAP_FAILED ? strerror(errno_sav) : "");
@@ -573,10 +574,9 @@ int munmap(void *start, size_t length) {
 	driller_malloc_install();
 
 	rc = old_munmap(start, length);
+	errno_sav = errno;
 	if(rc == 0)
 		map_invalidate_range((off_t)start, (off_t)start + length);
-	else
-		errno_sav = errno;
 
 	driller_malloc_restore();
 out_ret:
@@ -617,10 +617,9 @@ void * mremap(void *old_address, size_t old_size ,
 
 do_remap:
 	rc = old_mremap(old_address, old_size, new_size, flags);
-	if(rc == MAP_FAILED || mptr == NULL) {
-		errno_sav = errno;
+	errno_sav = errno;
+	if(rc == MAP_FAILED || mptr == NULL)
 		goto out;
-	}
 
 	/* file size must agree with mapping size */
 	if(ftruncate(map->fd, map->offset + new_size) != 0)
@@ -659,7 +658,7 @@ static int driller_brk(void *end_data_segment){
 	if((off_t)end_data_segment <= map_heap->start)
 		return 0;
 	new_size = (off_t)end_data_segment - map_heap->start;
-	if(ftruncate(map_heap->fd, new_size) != 0)
+	if(ftruncate(map_heap->fd, map_heap->offset + new_size) != 0)
 		perr("ftruncate");
 	if(mremap((void*)map_heap->start, map_heap->end - map_heap->start,
 		  new_size, 0) == MAP_FAILED)

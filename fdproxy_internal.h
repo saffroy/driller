@@ -5,6 +5,8 @@
 #define CONNECT_TIMEOUT 5 /* seconds */
 #define FDTABLE_HSIZE_INIT 32
 
+#define FDKEY_WELLKNOWN ((pid_t)0xf00a5a5)
+
 /*
  * request FD_NEW_KEY
  *  notify proxy of new (fd,key) pair

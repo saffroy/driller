@@ -12,16 +12,12 @@
 static int fdproxy_id;
 static int client_sock = -1;
 static int server_sock = -1;
-
 static int fdtable_hsize = FDTABLE_HSIZE_INIT;
-
 static char keystr_buf[20];
 
-static void fdtable_init(void) {
-	int rc;
-
-	rc = hcreate(fdtable_hsize);
-	assert(rc != 0);
+void fdproxy_set_key_id(struct fdkey *key, int id) {
+	key->pid = FDKEY_WELLKNOWN;
+	key->fd = id;
 }
 
 char *fdproxy_keystr(struct fdkey *key) {
@@ -31,6 +27,13 @@ char *fdproxy_keystr(struct fdkey *key) {
 		       "%d/%d", key->pid, key->fd);
 	assert(len < sizeof(keystr_buf));
 	return keystr_buf;
+}
+
+static void fdtable_init(void) {
+	int rc;
+
+	rc = hcreate(fdtable_hsize);
+	assert(rc != 0);
 }
 
 static void fdtable_add(int fd, struct fdkey *key) {

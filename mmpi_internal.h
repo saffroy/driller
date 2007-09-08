@@ -4,7 +4,6 @@
 #define CONNECT_TIMEOUT 5 /* seconds */
 #define USE_TMPFS 1
 #define CACHELINE_ALIGN 64
-#define MAP_CACHE_HSIZE_INIT 32
 
 #define MSG_PAYLOAD_SIZE_BYTES 4096
 #define MSG_POOL_SIZE 1024
@@ -84,11 +83,6 @@ struct shmem {
 struct driller_udata {
 	struct fdkey key;
 	char references[];
-};
-
-struct map_cache {
-	struct map_rec map;
-	void *address;
 };
 
 #endif /* MMPI_INTERNAL_H */
