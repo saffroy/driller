@@ -29,7 +29,7 @@ dlmalloc.o driller.o: CPPFLAGS += -D MSPACES
 test_driller test_mmpi test_fdproxy: LDFLAGS += -ldl
 
 clean:
-	$(RM) *.o $(progs) *.gcov *.gcda *.gcno core.*
+	$(RM) *.o $(progs) *.gcov *.gcda *.gcno core.* strace-*
 
 check: $(progs)
 	set -x; \

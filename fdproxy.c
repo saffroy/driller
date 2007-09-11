@@ -145,12 +145,10 @@ static void recv_request(int sock, void *buf, size_t buflen,
 		err("len (%zd) != buflen (%zd)", len, buflen);
 	if(fd_len == 0)
 		return;
-
 	if(msgh.msg_flags & MSG_CTRUNC)
 		err("msgh.flags has MSG_CTRUNC:"
 		    " check the number of open file descriptors");
-	if(msgh.msg_controllen < sizeof(struct cmsghdr))
-		err("msgh.msg_controllen < sizeof(struct cmsghdr)");
+	assert(msgh.msg_controllen >= sizeof(struct cmsghdr));
 
 	for(cmsg = CMSG_FIRSTHDR(&msgh);
 	     cmsg != NULL;
@@ -164,7 +162,7 @@ static void recv_request(int sock, void *buf, size_t buflen,
 		}
 	}
 
-	err("bad data");
+	err("inconsistent cmsg structure");
 }
 
 static void send_request(int sock, void *buf, size_t buflen,
@@ -196,7 +194,7 @@ static void send_request(int sock, void *buf, size_t buflen,
 	if(len == (size_t) (-1))
 		perr("sendmsg");
 	if(len != buflen)
-		warn("sendmsg returned %zd expected %zd", len, buflen);
+		err("sendmsg returned %zd expected %zd", len, buflen);
 }
 
 static int fdproxy_server_get_fd(int sock, struct fdkey *key) {
