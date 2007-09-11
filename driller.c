@@ -164,9 +164,11 @@ static void map_record(off_t start, off_t end, int prot, off_t offset,
 	if(!(prot & PROT_READ))
 		/* not readable, ignore */
 		return;
+#ifdef DONT_MAP_TEXT
 	if(prot & PROT_EXEC)
 		/* prefer to keep text as is, for profiling */
 		return;
+#endif
 	if(strncmp(path, "/dev/", strlen("/dev/")) == 0)
 		/* special files are not welcome */
 		return;

@@ -123,3 +123,4 @@ Cons
  * free of mmap'ed area costs 3 syscalls (munmap + ftruncate + close) vs. 1
    could be mitigated by fd cache
  * mremap of mmap'ed area costs 2 syscalls (ftruncate + mremap) vs. 1
+ * must choose between profiling and rebuild of text+rodata segments

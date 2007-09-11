@@ -3,6 +3,7 @@
 
 #define USE_TMPFS 1
 #define MAP_TABLE_INITIAL_SIZE 32 /* items */
+#define DONT_MAP_TEXT 1
 
 #if _LP64
 #define STACK_MAP_OFFSET	(1L << 37) /* 128GB */

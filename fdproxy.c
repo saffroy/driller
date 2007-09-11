@@ -118,95 +118,85 @@ static void fdtable_invalidate(struct fdkey *key) {
 	}
 }
 
-/* rcv_request, send_request implement fd passing with UNIX socket ancillary data
-   code copied (and fixed) from: 
-   http://linux-vserver.org/Secure_chroot_Barrier */
-static
-void rcv_request(int fd, void *buf, size_t buf_len, int *fds, size_t fd_len) {
-	struct msghdr msg;
-	struct iovec iov[1];
-	struct cmsghdr *cmptr;
+/* recv_request, send_request implement fd passing with UNIX socket ancillary data
+   see unix(7) cmsg(3) recvmsg(2) readv(2) */
+static void recv_request(int sock, void *buf, size_t buflen,
+			 int *fds, size_t fd_len) {
+	struct msghdr msgh;
+	struct iovec iov;
+	struct cmsghdr *cmsg;
+	size_t ctl_size = sizeof(*fds) * fd_len;
+	char ctl_buf[CMSG_SPACE(ctl_size)];
 	size_t len;
-	size_t msg_size = sizeof(fds[0]) * fd_len;
-	char control[CMSG_SPACE(msg_size)];
 
-	msg.msg_name = 0;
-	msg.msg_namelen = 0;
-	msg.msg_control = fd_len > 0 ? control : NULL;
-	msg.msg_controllen = fd_len > 0 ? sizeof(control) : 0;
-	msg.msg_flags = 0;
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
+	iov.iov_base = buf;
+	iov.iov_len = buflen;
 
-	iov[0].iov_base = buf;
-	iov[0].iov_len = buf_len;
+	memset(&msgh, 0, sizeof(msgh));
+	msgh.msg_iov = &iov;
+	msgh.msg_iovlen = 1;
+	msgh.msg_control = ctl_buf;
+	msgh.msg_controllen = sizeof(ctl_buf);
 
-	do {
-		len = recvmsg(fd, &msg, 0);
-	} while (len == (size_t) (-1) && (errno == EINTR || errno == EAGAIN));
-
-	if (len == (size_t) (-1))
+	len = recvmsg(sock, &msgh, 0);
+	if(len == (size_t) (-1))
 		perr("recvmsg");
-	if (len != buf_len)
-		err("len (%zd) != buf_len (%zd)", len, buf_len);
-	if (fd_len == 0)
+	if(len != buflen)
+		err("len (%zd) != buflen (%zd)", len, buflen);
+	if(fd_len == 0)
 		return;
 
-	if (msg.msg_controllen < sizeof(struct cmsghdr)) {
-		err_noabort("msg.msg_controllen < sizeof(struct cmsghdr)");
-		err("possible cause: too many open file descriptors");
-	}
+	if(msgh.msg_flags & MSG_CTRUNC)
+		err("msgh.flags has MSG_CTRUNC:"
+		    " check the number of open file descriptors");
+	if(msgh.msg_controllen < sizeof(struct cmsghdr))
+		err("msgh.msg_controllen < sizeof(struct cmsghdr)");
 
-	for (cmptr = CMSG_FIRSTHDR(&msg); cmptr != NULL;
-	     cmptr = CMSG_NXTHDR(&msg, cmptr)) {
-		if (cmptr->cmsg_len != CMSG_LEN(msg_size) ||
-		    cmptr->cmsg_level != SOL_SOCKET ||
-		    cmptr->cmsg_type != SCM_RIGHTS)
-			continue;
+	for(cmsg = CMSG_FIRSTHDR(&msgh);
+	     cmsg != NULL;
+	     cmsg = CMSG_NXTHDR(&msgh, cmsg)) {
 
-		memcpy(fds, CMSG_DATA(cmptr), msg_size);
-		return;
+		if(cmsg->cmsg_level == SOL_SOCKET
+		   && cmsg->cmsg_type == SCM_RIGHTS) {
+			assert(cmsg->cmsg_len == CMSG_LEN(ctl_size));
+			memcpy(fds, CMSG_DATA(cmsg), ctl_size);
+			return;
+		}
 	}
 
 	err("bad data");
 }
 
-static void send_request(int fd, void const *buf, size_t buf_len, int const *fds,
-			 size_t fd_len) {
+static void send_request(int sock, void *buf, size_t buflen,
+			 int *fds, size_t fd_len) {
+	struct msghdr msgh;
+	struct iovec iov;
 	struct cmsghdr *cmsg;
-	size_t msg_size = sizeof(fds[0]) * fd_len;
-	char control[CMSG_SPACE(msg_size)];
-	int *fdptr;
-	struct iovec iov[1];
+	size_t ctl_size = sizeof(*fds) * fd_len;
+	char ctl_buf[CMSG_SPACE(ctl_size)];
 	size_t len;
-	struct msghdr msg = {
-		.msg_name = 0,
-		.msg_namelen = 0,
-		.msg_iov = iov,
-		.msg_iovlen = 1,
-		.msg_control = control,
-		.msg_controllen = sizeof control,
-		.msg_flags = 0,
-	};
 
-	iov[0].iov_base = (void *) (buf);
-	iov[0].iov_len = buf_len;
+	iov.iov_base = buf;
+	iov.iov_len = buflen;
 
-	// from cmsg(3)
-	cmsg = CMSG_FIRSTHDR(&msg);
+	memset(&msgh, 0, sizeof(msgh));
+	msgh.msg_iov = &iov;
+	msgh.msg_iovlen = 1;
+	msgh.msg_control = ctl_buf;
+	msgh.msg_controllen = sizeof(ctl_buf);
+
+	cmsg = CMSG_FIRSTHDR(&msgh);
 	cmsg->cmsg_level = SOL_SOCKET;
 	cmsg->cmsg_type = SCM_RIGHTS;
-	cmsg->cmsg_len = CMSG_LEN(msg_size);
-	msg.msg_controllen = cmsg->cmsg_len;
+	cmsg->cmsg_len = CMSG_LEN(ctl_size);
+	msgh.msg_controllen = cmsg->cmsg_len;
+	memcpy(CMSG_DATA(cmsg), fds, ctl_size);
 
-	fdptr = (void *) (CMSG_DATA(cmsg));
-	memcpy(fdptr, fds, msg_size);
-
-	len = sendmsg(fd, &msg, 0);
-	if (len == (size_t) (-1))
+	len = sendmsg(sock, &msgh, 0);
+	if(len == (size_t) (-1))
 		perr("sendmsg");
-	if(len != buf_len)
-		warn("sendmsg returned %zd expected %zd", len, buf_len);
+	if(len != buflen)
+		warn("sendmsg returned %zd expected %zd", len, buflen);
 }
 
 static int fdproxy_server_get_fd(int sock, struct fdkey *key) {
@@ -214,7 +204,7 @@ static int fdproxy_server_get_fd(int sock, struct fdkey *key) {
 	int fd;
 
 	/* expect FD_ADD_KEY with ancillary fd */
-	rcv_request(sock, &req, sizeof(req), &fd, 1);
+	recv_request(sock, &req, sizeof(req), &fd, 1);
 	assert(req.magic == REQUEST_MAGIC);
 	assert(req.type == FD_ADD_KEY);
 	assert(memcmp(&req.key, key, sizeof(*key)) == 0);
@@ -255,7 +245,7 @@ static void fdproxy_handle_in(struct connection_context *cl) {
 
 	switch(cl->state) {
 	case STATE_IDLE:
-		rcv_request(cl->sock, &req, sizeof(req), NULL, 0);
+		recv_request(cl->sock, &req, sizeof(req), NULL, 0);
 		assert(req.magic == REQUEST_MAGIC);
 		switch(req.type) {
 		case FD_NEW_KEY:
@@ -325,7 +315,7 @@ void fdproxy_client_send_fd(int fd, struct fdkey *key) {
 	send_request(client_sock, &req, sizeof(req), &fd, 1);
 
 	/* receive ack */
-	rcv_request(client_sock, &req, sizeof(req), NULL, 0);
+	recv_request(client_sock, &req, sizeof(req), NULL, 0);
 	assert(req.magic == REQUEST_MAGIC);
 	assert(memcmp(&req.key, key, sizeof(*key)) == 0);
 	assert(req.type == FD_ADD_KEY_ACK);
@@ -342,7 +332,7 @@ int fdproxy_client_get_fd(struct fdkey *key) {
 	send_request(client_sock, &req, sizeof(req), NULL, 0);
 
 	/* receive response */
-	rcv_request(client_sock, &req, sizeof(req), NULL, 0);
+	recv_request(client_sock, &req, sizeof(req), NULL, 0);
 	assert(req.magic == REQUEST_MAGIC);
 	assert(memcmp(&req.key, key, sizeof(*key)) == 0);
 	switch(req.type) {
@@ -355,7 +345,7 @@ int fdproxy_client_get_fd(struct fdkey *key) {
 	}
 
 	/* receive fd */
-	rcv_request(client_sock, &req, sizeof(req), &fd, 1);
+	recv_request(client_sock, &req, sizeof(req), &fd, 1);
 	assert(req.magic == REQUEST_MAGIC);
 	assert(memcmp(&req.key, key, sizeof(*key)) == 0);
 	assert(req.type == FD_RSP_KEY);
