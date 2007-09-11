@@ -5,11 +5,10 @@
 #include "driller.h"
 
 struct map_cache {
-	struct map_rec map;
-	void *address;
+	struct map_rec mc_map;
+	void *mc_addr;
 };
 
-extern void map_cache_add(struct map_cache *mc, struct fdkey *key);
 extern struct map_cache *map_cache_lookup(struct fdkey *key);
 extern struct map_cache *map_cache_install(struct map_rec *map,
 					   struct fdkey *key);

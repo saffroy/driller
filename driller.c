@@ -164,6 +164,9 @@ static void map_record(off_t start, off_t end, int prot, off_t offset,
 	if(!(prot & PROT_READ))
 		/* not readable, ignore */
 		return;
+	if(prot & PROT_EXEC)
+		/* prefer to keep text as is, for profiling */
+		return;
 	if(strncmp(path, "/dev/", strlen("/dev/")) == 0)
 		/* special files are not welcome */
 		return;
@@ -606,10 +609,10 @@ void * mremap(void *old_address, size_t old_size ,
 	key.end = key.start + old_size;
 
 	mptr = tfind(&key, &map_root, map_cmp);
-	if(mptr == NULL)
+	map = (mptr != NULL ? *mptr : NULL);
+	if(map == NULL)
 		/* not one of our mappings, ignore it */
 		goto do_remap;
-	map = *mptr;
 
 	/* rule out unlikely corner cases */
 	assert(map->start == key.start);
@@ -618,7 +621,7 @@ void * mremap(void *old_address, size_t old_size ,
 do_remap:
 	rc = old_mremap(old_address, old_size, new_size, flags);
 	errno_sav = errno;
-	if(rc == MAP_FAILED || mptr == NULL)
+	if(rc == MAP_FAILED || map == NULL)
 		goto out;
 
 	/* file size must agree with mapping size */

@@ -21,6 +21,7 @@ static struct shmem *shmem;
 static int jobid;
 static int nprocs;
 static int rank;
+static char flip = 1;
 
 /*****************/
 
@@ -159,20 +160,6 @@ static struct message *msg_dequeue_head(struct message_queue *q) {
 	return m;
 }
 
-static struct message *msg_dequeue_head_nonblock(struct message_queue *q) {
-	struct message *m = NULL;
-
-	msg_queue_lock(q);
-	if(!__msg_queue_empty(q)) {
-		m = list_entry(list_next(&q->q_list),
-			       struct message, m_list);
-		__msg_dequeue(q, m);
-	}
-	msg_queue_unlock(q);
-
-	return m;
-}
-
 static struct message *msg_dequeue_from(struct message_queue *q, int src) {
 	struct message *m = NULL;
 
@@ -218,13 +205,16 @@ static void mmpi_send_driller_inval(int dest_rank,
 	struct shmem *dest = shmem + dest_rank;
 	struct message *m;
 
+	dbg("send driller_inval to rank %d for <%s>",
+	    dest_rank, fdproxy_keystr(key));
+
 	m = msg_alloc();
 
 	m->m_type = MSG_DRILLER_INVAL;
 	memcpy(&m->m_drill.map, map, sizeof(*map));
 	memcpy(&m->m_drill.key, key, sizeof(*key));
 
-	msg_enqueue(&dest->ctrl_q, m);
+	msg_enqueue(&dest->recv_q, m);
 }
 
 static void mmpi_map_invalidate_cb(struct map_rec *map) {
@@ -244,30 +234,6 @@ static void mmpi_map_invalidate_cb(struct map_rec *map) {
 			mmpi_send_driller_inval(i, map, key);
 	driller_free(udata);
 	map->user_data = NULL;
-}
-
-static void mmpi_poll_ctrl(void) {
-	struct shmem *my = shmem + rank;
-	struct message *m;
-	struct fdkey *key;
-
-	for(;;) {
-		m = msg_dequeue_head_nonblock(&my->ctrl_q);
-
-		if(m == NULL)
-			return;
-		switch(m->m_type) {
-		case MSG_DRILLER_INVAL:
-			key = &m->m_drill.key;
-			dbg("driller_inval on <%s>", fdproxy_keystr(key));
-			map_cache_remove(key);
-			break;
-		default:
-			err("bad message type: %d in msg %p", m->m_type, m);
-		}
-
-		msg_free(m);
-	}
 }
 
 static void mmpi_send_frags(int dest_rank, void *buf, size_t size) {
@@ -309,6 +275,7 @@ static void mmpi_send_driller(int dest_rank, void *buf, size_t size) {
 	if(map->user_data == NULL) {
 		udata = driller_malloc(sizeof(*udata) + nprocs);
 		assert(udata != NULL);
+		memset(udata, 0, sizeof(*udata));
 		map->user_data = udata;
 		key = &udata->key;
 		fdproxy_client_send_fd(map->fd, key);
@@ -340,7 +307,6 @@ static void mmpi_send_driller(int dest_rank, void *buf, size_t size) {
 }
 
 void mmpi_send(int dest_rank, void *buf, size_t size) {
-	mmpi_poll_ctrl();
 
 	if(size >= MSG_DRILLER_SIZE_THRESHOLD)
 		mmpi_send_driller(dest_rank, buf, size);
@@ -383,8 +349,8 @@ static void mmpi_recv_driller(int src_rank, void *buf, size_t *size,
 		data_start = map->offset + m->m_drill.offset;
 		data_end = data_start + m->m_drill.length;
 
-		local_map_start = mc->map.offset;
-		local_map_len = mc->map.end - mc->map.start;
+		local_map_start = mc->mc_map.offset;
+		local_map_len = mc->mc_map.end - mc->mc_map.start;
 		local_map_end = local_map_start + local_map_len;
 
 		/* is data outside local map? */
@@ -399,7 +365,7 @@ static void mmpi_recv_driller(int src_rank, void *buf, size_t *size,
 			m->m_drill.offset = data_start - local_map_start;
 		}
 	}
-	memcpy(buf, mc->address + m->m_drill.offset, m->m_drill.length);
+	memcpy(buf, mc->mc_addr + m->m_drill.offset, m->m_drill.length);
 	*size += m->m_drill.length;
 
 	/* notify sender of recv completion */
@@ -411,11 +377,10 @@ void mmpi_recv(int src_rank, void *buf, size_t *size) {
 	struct message *m = NULL;
 	int last_frag = 0;
 	char *p = buf;
+	struct fdkey *key;
 
 	*size = 0;
 	do {
-		mmpi_poll_ctrl();
-
 		m = msg_dequeue_from(&my->recv_q, src_rank);
 
 		switch(m->m_type) {
@@ -431,6 +396,11 @@ void mmpi_recv(int src_rank, void *buf, size_t *size) {
 			mmpi_recv_driller(src_rank, buf, size, m);
 			last_frag = 1;
 			break;
+		case MSG_DRILLER_INVAL:
+			key = &m->m_drill.key;
+			dbg("driller_inval on <%s>", fdproxy_keystr(key));
+			map_cache_remove(key);
+			break;
 		default:
 			err("bad message type: %d in msg %p", m->m_type, m);
 		}
@@ -440,9 +410,6 @@ void mmpi_recv(int src_rank, void *buf, size_t *size) {
 }
 
 void mmpi_barrier(void) {
-	static char flip = 1;
-
-	mmpi_poll_ctrl();
 
 #define box(rank) (shmem[rank].barrier_box)
 #define set_box(rank) (box(rank) = flip)
@@ -512,7 +479,6 @@ static void mmpi_init_shmem(void) {
 
 			msg_queue_init(&shm->free_q);
 			msg_queue_init(&shm->recv_q);
-			msg_queue_init(&shm->ctrl_q);
 			for(m = shm->msg_pool;
 			    m < shm->msg_pool + MSG_POOL_SIZE; m++) {
 				list_init(&m->m_list);
@@ -543,8 +509,8 @@ static void mmpi_init_shmem(void) {
 	}
 }
 
-void mmpi_init(int jobid, int n, int r) {
-
+void mmpi_init(int j, int n, int r) {
+	jobid = j;
 	nprocs = n;
 	rank = r;
 

@@ -7,8 +7,8 @@
 #include "mmpi.h"
 #include "log.h"
 
-#define THRTEST_CHUNK_SIZE (1 << 24) /* 16 MB */
-#define THRTEST_VOLUME (1 << 30) /* 1 GB */
+#define THRTEST_CHUNK_SIZE (1UL << 15) /* 32 kB */
+#define THRTEST_VOLUME (1UL << 32) /* 4 GB */
 #define THRTEST_CHUNK_COUNT (THRTEST_VOLUME/THRTEST_CHUNK_SIZE)
 
 static void usage(char *progname) {
@@ -105,15 +105,23 @@ int main(int argc, char**argv) {
 
 		printf("%d: send to %d\n", rank, 0);
 		for(i = 0; i < THRTEST_CHUNK_COUNT; i++) {
+#if 0
 			memset(buf, (char)i, THRTEST_CHUNK_SIZE);
+#else
+			buf[0] = buf[THRTEST_CHUNK_SIZE-1] = (char)i;
+#endif
 			mmpi_send(0, buf, THRTEST_CHUNK_SIZE);
+#if 1
+			free(buf);
+			buf = malloc(THRTEST_CHUNK_SIZE);		
+#endif
 		}
 	} else {
 		int i, j;
 		struct timeval tv1, tv2;
 		float delta;
 
-		printf("now time send/recv throughput (%d MB in %dkB chunks)...\n", 
+		printf("now time send/recv throughput (%ld MB in %ldkB chunks)...\n", 
 		       THRTEST_VOLUME >> 20, THRTEST_CHUNK_SIZE >> 10);
 		gettimeofday(&tv1, NULL);
 

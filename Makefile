@@ -1,7 +1,7 @@
 # (Un)comment the lines below if needed
 #GCOV_FLAGS := -fprofile-arcs -ftest-coverage -O0
 #DEBUG_FLAGS := -O0 -D DEBUG
-ASSERT_FLAGS := -D NDEBUG
+#ASSERT_FLAGS := -D NDEBUG
 
 CC := gcc
 CFLAGS := -Wall -O3 -g $(GCOV_FLAGS) $(DEBUG_FLAGS)

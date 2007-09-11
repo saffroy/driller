@@ -13,14 +13,14 @@
 static struct hsearch_data map_cache;
 static int map_cache_hsize = MAP_CACHE_HSIZE_INIT;
 
-void map_cache_add(struct map_cache *mc, struct fdkey *key) {
+static void map_cache_hash(struct map_cache *mc, struct fdkey *key) {
 	char *buf;
 	ENTRY e, *ep;
 	int rc;
 
 	buf = fdproxy_keystr(key);
 
-	dbg("add <%s> = %p", buf, mc);
+	dbg("add <%s> = %p", buf, (mc ? mc->mc_addr : NULL));
 
 	e.key = strdup(buf);
 	assert(e.key != NULL);
@@ -39,6 +39,27 @@ void map_cache_add(struct map_cache *mc, struct fdkey *key) {
 	}
 }
 
+struct map_cache *map_cache_unhash(struct fdkey *key) {
+	char *buf;
+	ENTRY e, *ep;
+	int rc;
+	struct map_cache *mc;
+
+	buf = fdproxy_keystr(key);
+
+	e.key = buf;
+	rc = hsearch_r(e, FIND, &ep, &map_cache);
+	if(ep != NULL) {
+		mc = ep->data;
+		ep->data = NULL;
+	} else {
+		dbg("cannot find '%s' in htable", buf);
+		mc = NULL;
+	}
+	dbg("unhash <%s> = %p", buf, (mc ? mc->mc_addr : NULL));
+	return mc;
+}
+
 struct map_cache *map_cache_lookup(struct fdkey *key) {
 	char *buf;
 	ENTRY e, *ep;
@@ -52,10 +73,10 @@ struct map_cache *map_cache_lookup(struct fdkey *key) {
 	if(ep != NULL) {
 		mc = ep->data;
 	} else {
-		dbg("cannot find '%s' in htable", buf);
+		dbg2("cannot find '%s' in htable", buf);
 		mc = NULL;
 	}
-	dbg("lookup <%s> = %p", buf, mc);
+	dbg2("lookup <%s> = %p", buf, (mc ? mc->mc_addr : NULL));
 	return mc;
 }
 
@@ -67,31 +88,32 @@ struct map_cache *map_cache_install(struct map_rec *map,
 
 	mc = malloc(sizeof(*mc));
 	assert(mc != NULL);
-	memcpy(&mc->map, map, sizeof(*map));
-	mc->address = driller_install_map(map);
-	map_cache_add(mc, key);
+	memcpy(&mc->mc_map, map, sizeof(*map));
+	mc->mc_addr = driller_install_map(map);
+	map_cache_hash(mc, key);
 
-	dbg("install <%s> @ %p", fdproxy_keystr(key), mc->address);
+	dbg("install <%s> @ %p", fdproxy_keystr(key), mc->mc_addr);
 	return mc;
 }
 
 void map_cache_update(struct map_rec *map, struct fdkey *key,
 		      struct map_cache *mc) {
-	driller_remove_map(&mc->map, mc->address);
-	memcpy(&mc->map, map, sizeof(*map));
-	mc->address = driller_install_map(map);
+	driller_remove_map(&mc->mc_map, mc->mc_addr);
+	memcpy(&mc->mc_map, map, sizeof(*map));
+	mc->mc_addr = driller_install_map(map);
 
-	dbg("update <%s> @ %p", fdproxy_keystr(key), mc->address);
+	dbg("update <%s> @ %p", fdproxy_keystr(key), mc->mc_addr);
 }
 
 void map_cache_remove(struct fdkey *key) {
 	struct map_cache *mc;
 
-	mc = map_cache_lookup(key);
+	mc = map_cache_unhash(key);
 	if(mc != NULL) {
-		map_cache_add(NULL, key);
-		driller_remove_map(&mc->map, mc->address);
-		close(mc->map.fd);
+		dbg("remove <%s> = %p", fdproxy_keystr(key), mc->mc_addr);
+		driller_remove_map(&mc->mc_map, mc->mc_addr);
+		close(mc->mc_map.fd);
+		memset(mc, 0xf0, sizeof(mc));
 		free(mc);
 	}
 }

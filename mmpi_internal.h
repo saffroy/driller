@@ -7,7 +7,8 @@
 
 #define MSG_PAYLOAD_SIZE_BYTES 4096
 #define MSG_POOL_SIZE 1024
-#define MSG_DRILLER_SIZE_THRESHOLD (1<<17) /* 128kB */
+//#define MSG_DRILLER_SIZE_THRESHOLD (1<<17) /* 128kB */
+#define MSG_DRILLER_SIZE_THRESHOLD (0)
 
 #if USE_TMPFS
 #define TMPDIR "/dev/shm"
@@ -72,7 +73,6 @@ struct shmem {
 	volatile int driller_send_running;
 	struct message_queue free_q;
 	struct message_queue recv_q;
-	struct message_queue ctrl_q;
 	struct message msg_pool[MSG_POOL_SIZE];
 };
 

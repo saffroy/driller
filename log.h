@@ -36,6 +36,12 @@
 #define dbg(fmt,arg...) do { } while(0)
 #endif
 
+#ifdef DEBUG2
+#define dbg2 dbg
+#else
+#define dbg2(fmt,arg...) do { } while(0)
+#endif
+
 /*
  * utilities
  */

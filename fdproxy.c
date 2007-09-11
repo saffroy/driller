@@ -36,7 +36,7 @@ static void fdtable_init(void) {
 	assert(rc != 0);
 }
 
-static void fdtable_add(int fd, struct fdkey *key) {
+static void fdtable_hash(int fd, struct fdkey *key) {
 	char *buf;
 	ENTRY e, *ep;
 
@@ -44,9 +44,16 @@ static void fdtable_add(int fd, struct fdkey *key) {
 
 	dbg("add <%s> = %d", buf, fd);
 
+	e.key = buf;
+	ep = hsearch(e, FIND);
+	if(ep != NULL) {
+		ep->data = (void*)(long)fd;
+		return;
+	}
+
 	e.key = strdup(buf);
-	assert(e.key != NULL);
 	e.data = (void*)(long)fd;
+	assert(e.key != NULL);
 	ep = hsearch(e, ENTER);
 	if(ep == NULL) {
 		/* retry with larger htable */
@@ -80,14 +87,33 @@ static int fdtable_lookup(struct fdkey *key) {
 	return fd;
 }
 
+static int fdtable_unhash(struct fdkey *key) {
+	char *buf;
+	ENTRY e, *ep;
+	int fd;
+
+	buf = fdproxy_keystr(key);
+
+	e.key = buf;
+	ep = hsearch(e, FIND);
+	if(ep != NULL) {
+		fd = (int)(long)ep->data;
+		ep->data = (void*)(long)-1;
+	} else {
+		dbg("cannot find '%s' in htable", buf);
+		fd = -1;
+	}
+	dbg("unhash <%s> = %d", buf, fd);
+	return fd;
+}
+
 static void fdtable_invalidate(struct fdkey *key) {
 	int fd;
 
-	fd = fdtable_lookup(key);
-	if(fd != -1) {
+	dbg("invalidate <%s>", fdproxy_keystr(key));
+	fd = fdtable_unhash(key);
+	if(fd != -1)
 		close(fd);
-		fdtable_add(-1, key);
-	}
 }
 
 /* rcv_request, send_request implement fd passing with UNIX socket ancillary data
@@ -246,7 +272,7 @@ static void fdproxy_handle_in(struct connection_context *cl) {
 
 	case STATE_RCV_NEW_KEY:
 		fd = fdproxy_server_get_fd(cl->sock, &cl->rcvd_key);
-		fdtable_add(fd, &cl->rcvd_key);
+		fdtable_hash(fd, &cl->rcvd_key);
 		cl->state = STATE_RCV_ADD_KEY;
 		break;
 
@@ -279,6 +305,7 @@ static void fdproxy_handle_out(struct connection_context *cl) {
 void fdproxy_client_send_fd(int fd, struct fdkey *key) {
 	struct fdproxy_request req;
 
+	dbg("send <%s>", fdproxy_keystr(key));
 	/* send request notifying new key */
 	if(key->pid != FDKEY_WELLKNOWN) {
 		key->pid = getpid();
@@ -328,12 +355,15 @@ int fdproxy_client_get_fd(struct fdkey *key) {
 	assert(req.magic == REQUEST_MAGIC);
 	assert(memcmp(&req.key, key, sizeof(*key)) == 0);
 	assert(req.type == FD_RSP_KEY);
+
+	dbg("get <%s> = %d", fdproxy_keystr(key), fd);
 	return fd;
 }
 
 void fdproxy_client_invalidate_fd(struct fdkey *key) {
 	struct fdproxy_request req;
 
+	dbg("invalidate <%s>", fdproxy_keystr(key));
 	/* send request notifying stale key */
 	req.magic = REQUEST_MAGIC;
 	req.type = FD_INVAL_KEY;
