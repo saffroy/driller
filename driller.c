@@ -1,13 +1,12 @@
 /*
  * driller.c
- * install and maintain file-backed mappings for all readable parts 
- * of a process address space
- */
-
-/*
- * portability note: 
- * - all stack-related code assumes a single stack that grows down
- * - not thread safe (but can be done with USE_LOCKS or ptmalloc)
+ *
+ * Copyright (C) Jean-Marc Saffroy <saffroy@gmail.com> 2007
+ * This program is free software, distributed under the terms of the
+ * GNU General Public License version 2.
+ *
+ * install and maintain file-backed memory mappings for most readable
+ * parts of a process address space
  */
 
 #include <unistd.h>
@@ -77,6 +76,11 @@ extern void *(*__realloc_hook)(void *mem, size_t bytes, const void *caller);
 extern void *(*__memalign_hook)(size_t align, size_t bytes, const void *caller);
 
 /******************/
+
+/*
+ * hooks and allocation routines for cases when the regular malloc/free
+ * cannot be used, because they are calling us
+ */
 
 void *driller_malloc(size_t bytes) {
 	return mspace_malloc(driller_mspace, bytes);
@@ -148,6 +152,10 @@ static int map_cmp(const void *a, const void *b) {
 	return 0;
 }
 
+/*
+ * record a description of a memory segment that is/will become
+ * a file-backed memory mapping - uses tsearch(3)
+ */
 static void map_record(off_t start, off_t end, int prot, off_t offset,
 		       char *path, int fd) {
 	struct map_rec *map;
@@ -196,6 +204,9 @@ static void map_record(off_t start, off_t end, int prot, off_t offset,
 	assert(rc != NULL);
 }
 
+/*
+ * parse and record the content of /proc/self/maps
+ */
 static void map_parse(void)
 {
 	const char *file = "/proc/self/maps";
@@ -269,7 +280,7 @@ static void map_overload(void *start, size_t length, int prot, int flags,
 }
 
 /*
- * overloading the stack requires running this from a separate stack
+ * overloading the stack requires running this function from a separate stack
  */
 static void map_overload_stack(void) {
 	off_t size;
@@ -296,6 +307,9 @@ static void map_overload_stack(void) {
 	dbg("remapped stack at %lx", map_stack->start);
 }
 
+/*
+ * return the page offset of the current stack pointer
+ */
 static inline long stack_base(void) {
         unsigned long sp;
 	unsigned long mask = ~((unsigned long)page_size-1);
@@ -310,6 +324,9 @@ static inline long stack_base(void) {
         return sp & mask;
 }
 
+/*
+ * run a function from an alternate stack
+ */
 static void run_altstack(void (*f)(void), void *stack, long stack_size) {
 	ucontext_t alts_main, alts_func;
 
@@ -324,6 +341,9 @@ static void run_altstack(void (*f)(void), void *stack, long stack_size) {
 		perr("swapcontext");
 }
 
+/*
+ * SIGSEGV handler used to grow the stack on demand
+ */
 static void segv_sigaction(int signum, siginfo_t *si, void *uctx) {
 	off_t addr = (off_t)si->si_addr;
 	off_t size;
@@ -367,6 +387,9 @@ out_raise:
 	errno = errno_sav;
 }
 
+/*
+ * return a new fd to a file suitable for memory mapping
+ */
 static int map_create_fd(char *fmt, ...) {
 	char *filename;
 	int len;
@@ -394,6 +417,9 @@ static int map_create_fd(char *fmt, ...) {
 	return fd;
 }
 
+/*
+ * replace a memory segment by a file-backed memory mapping
+ */
 static void map_rebuild(struct map_rec *map, int index) {
 	size_t size;
 	int rc;
@@ -470,6 +496,10 @@ static void map_rebuild(struct map_rec *map, int index) {
 	}
 }
 
+/*
+ * trim or destroy the descriptions of memory segments
+ * that were affected by a map or unmap operation
+ */
 static void map_invalidate_range(off_t start, off_t end) {
 	struct map_rec *map;
 
@@ -526,6 +556,11 @@ static void map_invalidate_range(off_t start, off_t end) {
 
 /******************/
 
+/*
+ * overloads the regular mmap
+ * anonymous maps become shared file maps that can be used
+ * by other processes
+ */
 void *mmap(void *start, size_t length, int prot, int flags,
 	   int fd, off_t offset) {
 	void *rc = MAP_FAILED;
@@ -571,6 +606,9 @@ out:
 	return rc;
 }
 
+/*
+ * overload the regular munmap
+ */
 int munmap(void *start, size_t length) {
 	int rc, errno_sav;
 
@@ -594,6 +632,9 @@ out_ret:
 	return rc;
 }
 
+/*
+ * overload the regular mremap
+ */
 void * mremap(void *old_address, size_t old_size ,
 	      size_t new_size, int flags) {
 	void *rc;
@@ -659,6 +700,10 @@ out:
 	return rc;
 }
 
+/*
+ * overload the regular brk
+ * grow the memory map used for the heap
+ */
 static int driller_brk(void *end_data_segment){
 	off_t new_size;
 
@@ -778,10 +823,17 @@ void driller_init(void) {
 	driller_initialized = 1;
 }
 
+/*
+ * register a callback
+ * this callback notifies the user that a map has been changed or removed
+ */
 void driller_register_map_invalidate_cb(void (*f)(struct map_rec *map)) {
 	map_invalidate_cb = f;
 }
 
+/*
+ * find the map record for a given memory range
+ */
 struct map_rec *driller_lookup_map(void *start, size_t length) {
 	struct map_rec key, **mptr;
 
@@ -794,6 +846,10 @@ struct map_rec *driller_lookup_map(void *start, size_t length) {
 		return *mptr;
 }
 
+/*
+ * memory map a given file range
+ * used to bypass the overloaded mmap
+ */
 void *driller_install_map(struct map_rec *map) {
 	void *rc;
 
@@ -804,6 +860,10 @@ void *driller_install_map(struct map_rec *map) {
 	return rc;
 }
 
+/*
+ * destroy the given file map
+ * used to bypass the overloaded munmap
+ */
 void driller_remove_map(struct map_rec *map, void *p) {
 	if(old_munmap(p, map->end - map->start) != 0)
 		perr("munmap");

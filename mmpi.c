@@ -1,6 +1,12 @@
 /*
- * mini-MPI
- *  a shared-memory pseudo-MPI lib for testing ideas
+ * mmpi.c
+ *
+ * Copyright (C) Jean-Marc Saffroy <saffroy@gmail.com> 2007
+ * This program is free software, distributed under the terms of the
+ * GNU General Public License version 2.
+ *
+ * mini-MPI: a shared-memory pseudo-MPI lib showing the use
+ * of driller, map_cache and fdproxy
  */
 
 #include <unistd.h>
@@ -25,6 +31,11 @@ static char flip = 1;
 
 /*****************/
 
+/*
+ * a set of primitives for doubly linked lists in a shared
+ * memory segment, which can be mapped by several processes
+ * at different addresses
+ */
 static void list_init(struct list_head *head) {
 #ifndef NDEBUG
 	head->magic = LIST_MAGIC;
@@ -105,6 +116,10 @@ static inline int list_empty(struct list_head *head) {
 	for(pos = list_next(head); pos != head; pos = list_next(pos))
 
 /*****************/
+
+/*
+ * some message queuing primitives
+ */
 
 static void msg_queue_init(struct message_queue *q) {
 	spin_lock_init(&q->q_lock);
@@ -200,6 +215,9 @@ static void msg_free(struct message *m) {
 
 /*****************/
 
+/*
+ * send a DRILLER_INVAL mmpi message signalling that the given key is invalid
+ */
 static void mmpi_send_driller_inval(int dest_rank,
 				    struct map_rec *map, struct fdkey *key) {
 	struct shmem *dest = shmem + dest_rank;
@@ -217,6 +235,9 @@ static void mmpi_send_driller_inval(int dest_rank,
 	msg_enqueue(&dest->recv_q, m);
 }
 
+/*
+ * send DRILLER_INVAL to all processes that use the given map
+ */
 static void mmpi_map_invalidate_cb(struct map_rec *map) {
 	struct driller_udata *udata;
 	struct fdkey *key;
@@ -236,6 +257,9 @@ static void mmpi_map_invalidate_cb(struct map_rec *map) {
 	map->user_data = NULL;
 }
 
+/*
+ * send data buffer by copying to the shared mem
+ */
 static void mmpi_send_frags(int dest_rank, void *buf, size_t size) {
 	struct shmem *dest = shmem + dest_rank;
 	struct message *m;
@@ -255,6 +279,9 @@ static void mmpi_send_frags(int dest_rank, void *buf, size_t size) {
 	} while(remainder > 0);
 }
 
+/*
+ * send data buffer by remapping it in the receiving process
+ */
 static void mmpi_send_driller(int dest_rank, void *buf, size_t size) {
 	struct shmem *my = shmem + rank;
 	struct shmem *dest = shmem + dest_rank;
@@ -314,6 +341,9 @@ void mmpi_send(int dest_rank, void *buf, size_t size) {
 		mmpi_send_frags(dest_rank, buf, size);
 }
 
+/*
+ * receive data buffer by remapping it locally
+ */
 static void mmpi_recv_driller(int src_rank, void *buf, size_t *size,
 			      struct message *m) {
 	struct shmem *src = shmem + src_rank;
@@ -325,6 +355,7 @@ static void mmpi_recv_driller(int src_rank, void *buf, size_t *size,
 	key = &m->m_drill.key;
 	mc = map_cache_lookup(key);
 	if(mc == NULL) {
+		/* establish new mapping for this segment */
 		map->fd = fdproxy_client_get_fd(key);
 		assert(map->fd >= 0);
 		mc = map_cache_install(map, key);
@@ -372,6 +403,9 @@ static void mmpi_recv_driller(int src_rank, void *buf, size_t *size,
 	src->driller_send_running = 0;
 }
 
+/*
+ * receive data buffer, and handle DRILLER_INVAL messages
+ */
 void mmpi_recv(int src_rank, void *buf, size_t *size) {
 	struct shmem *my = shmem + rank;
 	struct message *m = NULL;
@@ -409,6 +443,9 @@ void mmpi_recv(int src_rank, void *buf, size_t *size) {
 	} while(!last_frag);
 }
 
+/*
+ * a simple barrier in shared memory
+ */
 void mmpi_barrier(void) {
 
 #define box(rank) (shmem[rank].barrier_box)

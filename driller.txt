@@ -95,6 +95,8 @@ Pros
 Cons
  * requires external allocator so mmap can be overloaded
  * dlmallopt is not glibc-compatible (though rather close)
+ * creates fds unknown to the app, which can be troublesome (eg. when
+   app expects its new fds to increase sequentially)
  * fork does not work (yet?)
  * increased memory consumption: segments are completely rewritten, no
    sharing of unmodified datas (how much? not sure if it's significant)

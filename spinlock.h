@@ -1,3 +1,12 @@
+/*
+ * spinlock.h
+ *
+ * Copyright (C) Jean-Marc Saffroy <saffroy@gmail.com> 2007
+ * This program is free software, distributed under the terms of the
+ * GNU General Public License version 2.
+ *
+ */
+
 #ifndef SPINLOCK_H
 #define SPINLOCK_H
 
@@ -59,7 +68,6 @@ static inline void spin_lock(struct spinlock *lock) {
 
 static inline void spin_unlock(struct spinlock *lock) {
 	assert(lock->magic == LOCK_MAGIC);
-//	lock->lck = 1; //xxx does not work, dunno why???
 #if __x86_64__ || __i386__ 
 	asm volatile("movl $1,%0"
 		     :"=m" (lock->lck)

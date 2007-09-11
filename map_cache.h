@@ -1,3 +1,12 @@
+/*
+ * map_cache.h
+ *
+ * Copyright (C) Jean-Marc Saffroy <saffroy@gmail.com> 2007
+ * This program is free software, distributed under the terms of the
+ * GNU General Public License version 2.
+ *
+ */
+
 #ifndef MAP_CACHE_H
 #define MAP_CACHE_H
 

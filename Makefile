@@ -37,4 +37,7 @@ check: $(progs)
 		sh $$p.sh ; \
 	done
 
-.PHONY: clean check
+htags:
+	htags -aDfFgns
+
+.PHONY: clean check htags

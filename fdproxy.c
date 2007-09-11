@@ -1,3 +1,16 @@
+/*
+ * fdproxy.c
+ *
+ * Copyright (C) Jean-Marc Saffroy <saffroy@gmail.com> 2007
+ * This program is free software, distributed under the terms of the
+ * GNU General Public License version 2.
+ *
+ * enable client processes to exchange file descriptors
+ * using Unix sockets
+ * a daemon process is forked and receives/serves file descriptors
+ * from/to client processes
+ */
+
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -13,13 +26,19 @@ static int fdproxy_id;
 static int client_sock = -1;
 static int server_sock = -1;
 static int fdtable_hsize = FDTABLE_HSIZE_INIT;
-static char keystr_buf[20];
+static char keystr_buf[30];
 
+/*
+ * give a specific id to a fd key
+ */
 void fdproxy_set_key_id(struct fdkey *key, int id) {
 	key->pid = FDKEY_WELLKNOWN;
 	key->fd = id;
 }
 
+/*
+ * return a (static) string representing a key
+ */
 char *fdproxy_keystr(struct fdkey *key) {
 	int len;
 
@@ -36,6 +55,9 @@ static void fdtable_init(void) {
 	assert(rc != 0);
 }
 
+/*
+ * record a (key, fd) pair
+ */
 static void fdtable_hash(int fd, struct fdkey *key) {
 	char *buf;
 	ENTRY e, *ep;
@@ -68,6 +90,9 @@ static void fdtable_hash(int fd, struct fdkey *key) {
 	}
 }
 
+/*
+ * find and return fd matching key
+ */
 static int fdtable_lookup(struct fdkey *key) {
 	char *buf;
 	ENTRY e, *ep;
@@ -87,6 +112,9 @@ static int fdtable_lookup(struct fdkey *key) {
 	return fd;
 }
 
+/*
+ * remove record of (key, fd) pair
+ */
 static int fdtable_unhash(struct fdkey *key) {
 	char *buf;
 	ENTRY e, *ep;
@@ -107,6 +135,9 @@ static int fdtable_unhash(struct fdkey *key) {
 	return fd;
 }
 
+/*
+ * unhash and close fd for the given key
+ */
 static void fdtable_invalidate(struct fdkey *key) {
 	int fd;
 
@@ -197,6 +228,9 @@ static void send_request(int sock, void *buf, size_t buflen,
 		err("sendmsg returned %zd expected %zd", len, buflen);
 }
 
+/*
+ * daemon: receive fd after reception of FD_NEW_KEY
+ */
 static int fdproxy_server_get_fd(int sock, struct fdkey *key) {
 	struct fdproxy_request req;
 	int fd;
@@ -209,6 +243,9 @@ static int fdproxy_server_get_fd(int sock, struct fdkey *key) {
 	return fd;
 }
 
+/*
+ * daemon: send ACK after reception of FD_ADD_KEY
+ */
 static void fdproxy_server_get_fd_ack(int sock, struct fdkey *key) {
 	struct fdproxy_request req;
 
@@ -219,6 +256,9 @@ static void fdproxy_server_get_fd_ack(int sock, struct fdkey *key) {
 	send_request(sock, &req, sizeof(req), NULL, 0);
 }
 
+/*
+ * daemon: send key after reception of FD_REQ_KEY
+ */
 static void fdproxy_server_send_fd(int sock, int fd, struct fdkey *key) {
 	struct fdproxy_request req;
 
@@ -237,6 +277,9 @@ static void fdproxy_server_send_fd(int sock, int fd, struct fdkey *key) {
 	}
 }
 
+/*
+ * update client state when receiving messages
+ */
 static void fdproxy_handle_in(struct connection_context *cl) {
 	struct fdproxy_request req;
 	int fd;
@@ -273,6 +316,9 @@ static void fdproxy_handle_in(struct connection_context *cl) {
 	}
 }
 
+/*
+ * update client state when sending messages
+ */
 static void fdproxy_handle_out(struct connection_context *cl) {
 	int fd;
 
@@ -294,6 +340,9 @@ static void fdproxy_handle_out(struct connection_context *cl) {
 	}
 }
 
+/*
+ * client: send (key, fd) pair to daemon
+ */
 void fdproxy_client_send_fd(int fd, struct fdkey *key) {
 	struct fdproxy_request req;
 
@@ -319,6 +368,9 @@ void fdproxy_client_send_fd(int fd, struct fdkey *key) {
 	assert(req.type == FD_ADD_KEY_ACK);
 }
 
+/*
+ * client: request fd for the given key from daemon
+ */
 int fdproxy_client_get_fd(struct fdkey *key) {
 	struct fdproxy_request req;
 	int fd;
@@ -352,6 +404,9 @@ int fdproxy_client_get_fd(struct fdkey *key) {
 	return fd;
 }
 
+/*
+ * client: tell daemon to drop fd paired to given key
+ */
 void fdproxy_client_invalidate_fd(struct fdkey *key) {
 	struct fdproxy_request req;
 
@@ -364,7 +419,9 @@ void fdproxy_client_invalidate_fd(struct fdkey *key) {
 }
 
 
-/* init addr to bind UNIX socket in "abstract" name space */
+/*
+ * init addr struct to bind UNIX socket in "abstract" name space
+ */
 static void fdproxy_init_addr(struct sockaddr_un *addr) {
 	memset(addr, 0, sizeof(*addr));
 	addr->sun_family = AF_UNIX;
@@ -372,6 +429,9 @@ static void fdproxy_init_addr(struct sockaddr_un *addr) {
 		 "fdproxy-%d", fdproxy_id);
 }
 
+/*
+ * daemon: main loop
+ */
 static void fdproxy_daemon(void) {
 	struct sockaddr_un addr;
 

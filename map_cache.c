@@ -1,3 +1,15 @@
+/*
+ * map_cache.c
+ *
+ * Copyright (C) Jean-Marc Saffroy <saffroy@gmail.com> 2007
+ * This program is free software, distributed under the terms of the
+ * GNU General Public License version 2.
+ *
+ * map, unmap and keep track of memory maps to foreign processes,
+ * avoiding the overhead of additional system calls when the same map
+ * is used for more than one transaction
+ */
+
 #include <unistd.h>
 #include <string.h>
 #include <search.h>
@@ -13,6 +25,9 @@
 static struct hsearch_data map_cache;
 static int map_cache_hsize = MAP_CACHE_HSIZE_INIT;
 
+/*
+ * record a (key, map_cache) pair
+ */
 static void map_cache_hash(struct map_cache *mc, struct fdkey *key) {
 	char *buf;
 	ENTRY e, *ep;
@@ -46,6 +61,9 @@ static void map_cache_hash(struct map_cache *mc, struct fdkey *key) {
 	}
 }
 
+/*
+ * remove record of (key, map_cache) pair
+ */
 struct map_cache *map_cache_unhash(struct fdkey *key) {
 	char *buf;
 	ENTRY e, *ep;
@@ -67,6 +85,9 @@ struct map_cache *map_cache_unhash(struct fdkey *key) {
 	return mc;
 }
 
+/*
+ * find and return map_cache matching key
+ */
 struct map_cache *map_cache_lookup(struct fdkey *key) {
 	char *buf;
 	ENTRY e, *ep;
@@ -87,6 +108,9 @@ struct map_cache *map_cache_lookup(struct fdkey *key) {
 	return mc;
 }
 
+/*
+ * record new (key, map_cache) pair and establish memory map
+ */
 struct map_cache *map_cache_install(struct map_rec *map,
 				    struct fdkey *key) {
 	struct map_cache *mc;
@@ -103,6 +127,9 @@ struct map_cache *map_cache_install(struct map_rec *map,
 	return mc;
 }
 
+/*
+ * refresh and remap map_cache for the given key
+ */
 void map_cache_update(struct map_rec *map, struct fdkey *key,
 		      struct map_cache *mc) {
 	driller_remove_map(&mc->mc_map, mc->mc_addr);
@@ -112,6 +139,9 @@ void map_cache_update(struct map_rec *map, struct fdkey *key,
 	dbg("update <%s> @ %p", fdproxy_keystr(key), mc->mc_addr);
 }
 
+/*
+ * unhash, unmap and close fd for the given key
+ */
 void map_cache_remove(struct fdkey *key) {
 	struct map_cache *mc;
 
