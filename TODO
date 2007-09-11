@@ -1,3 +1,0 @@
-- bug with test_mmpi, 1MB chunks and systematic free/malloc
-		err("msg.msg_controllen < sizeof(struct cmsghdr)");
-strace shows the flag MSG_TRUNC !?

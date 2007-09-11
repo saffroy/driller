@@ -3,6 +3,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include <assert.h>
+#include <malloc.h>
 
 #include "mmpi.h"
 #include "log.h"
@@ -99,6 +100,9 @@ int main(int argc, char**argv) {
 	mmpi_barrier();
 
 	/* test throughput */
+#if 1
+	mallopt(M_MMAP_THRESHOLD, THRTEST_CHUNK_SIZE);
+#endif
 	buf = malloc(THRTEST_CHUNK_SIZE);
 	if(rank != 0) {
 		int i;

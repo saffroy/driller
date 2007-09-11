@@ -112,8 +112,10 @@ static void fdtable_invalidate(struct fdkey *key) {
 
 	dbg("invalidate <%s>", fdproxy_keystr(key));
 	fd = fdtable_unhash(key);
-	if(fd != -1)
-		close(fd);
+	if(fd != -1) {
+		if(close(fd) != 0)
+			perr("close");
+	}
 }
 
 /* rcv_request, send_request implement fd passing with UNIX socket ancillary data
@@ -150,8 +152,10 @@ void rcv_request(int fd, void *buf, size_t buf_len, int *fds, size_t fd_len) {
 	if (fd_len == 0)
 		return;
 
-	if (msg.msg_controllen < sizeof(struct cmsghdr))
-		err("msg.msg_controllen < sizeof(struct cmsghdr)");
+	if (msg.msg_controllen < sizeof(struct cmsghdr)) {
+		err_noabort("msg.msg_controllen < sizeof(struct cmsghdr)");
+		err("possible cause: too many open file descriptors");
+	}
 
 	for (cmptr = CMSG_FIRSTHDR(&msg); cmptr != NULL;
 	     cmptr = CMSG_NXTHDR(&msg, cmptr)) {

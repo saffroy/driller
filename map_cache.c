@@ -22,6 +22,13 @@ static void map_cache_hash(struct map_cache *mc, struct fdkey *key) {
 
 	dbg("add <%s> = %p", buf, (mc ? mc->mc_addr : NULL));
 
+	e.key = buf;
+	rc = hsearch_r(e, FIND, &ep, &map_cache);
+	if(ep != NULL) {
+		ep->data = mc;
+		return;
+	}
+
 	e.key = strdup(buf);
 	assert(e.key != NULL);
 	e.data = mc;
@@ -112,7 +119,8 @@ void map_cache_remove(struct fdkey *key) {
 	if(mc != NULL) {
 		dbg("remove <%s> = %p", fdproxy_keystr(key), mc->mc_addr);
 		driller_remove_map(&mc->mc_map, mc->mc_addr);
-		close(mc->mc_map.fd);
+		if(close(mc->mc_map.fd) != 0)
+			perr("close");
 		memset(mc, 0xf0, sizeof(mc));
 		free(mc);
 	}

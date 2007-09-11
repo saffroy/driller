@@ -216,7 +216,8 @@ static void map_parse(void)
 	/* make sure we've read the whole thing */
 	if(read(fd, buf, sizeof(buf)) != 0)
 		err("could not read %s entirely", file);
-	close(fd);
+	if(close(fd) != 0)
+		perr("close");
 
 	line = buf;
 	for(lineno = 0; ; lineno++) {
@@ -492,7 +493,8 @@ static void map_invalidate_range(off_t start, off_t end) {
 			if(ftruncate(map->fd, 0) != 0)
 				perr("ftruncate");
 
-			close(map->fd);
+			if(close(map->fd) != 0)
+				perr("close");
 			free(map->path);
 			free(map);
 			continue;
@@ -541,7 +543,8 @@ void *mmap(void *start, size_t length, int prot, int flags,
 	fd = map_create_fd("%s/shmem-%d-anon", TMPDIR, getpid());
 	if(ftruncate(fd, offset + length) != 0) {
 		errno_sav = errno;
-		close(fd);
+		if(close(fd) != 0)
+			perr("close");
 		goto out;
 	}
 
@@ -549,7 +552,8 @@ void *mmap(void *start, size_t length, int prot, int flags,
 	rc = old_mmap(start, length, prot, new_flags, fd, offset);
 	errno_sav = errno;
 	if(rc == MAP_FAILED) {
-		close(fd);
+		if(close(fd) != 0)
+			perr("close");
 		goto out;
 	}
 
