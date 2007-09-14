@@ -640,8 +640,13 @@ out_ret:
 /*
  * overload the regular mremap
  */
+#if __GLIBC_PREREQ(2,4)
+void * mremap(void *old_address, size_t old_size ,
+	      size_t new_size, int flags, ...) {
+#else
 void * mremap(void *old_address, size_t old_size ,
 	      size_t new_size, int flags) {
+#endif
 	void *rc;
 	int errno_sav;
 	struct map_rec key;
