@@ -1,0 +1,8 @@
+- proto mremap avec "..."
+- formats scanf, dbg llx...
+- flags LFS : getconf LFS_CFLAGS
+- min: cmp types?
+- stack_base = long: signé !!
+- changer types: uintptr_t
+- patch gael
+- README

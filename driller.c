@@ -27,6 +27,7 @@
 #include "dlmalloc.h"
 
 static int driller_initialized = 0;
+static int driller_malloc_installed = 0;
 
 /* root for the sorted tree of map structs */
 static void *map_root = NULL;
@@ -111,7 +112,7 @@ static void *driller_memalign_hook(size_t align, size_t bytes, const void *calle
 }
 
 static void driller_malloc_install(void){
-	if(!driller_initialized)
+	if(!driller_initialized || driller_malloc_installed)
 		return;
 
 	old_malloc_hook = __malloc_hook;
@@ -123,6 +124,8 @@ static void driller_malloc_install(void){
 	__free_hook = driller_free_hook;
 	__realloc_hook = driller_realloc_hook;
 	__memalign_hook = driller_memalign_hook;
+
+	driller_malloc_installed = 1;
 }
 
 static void driller_malloc_restore(void){
@@ -133,6 +136,8 @@ static void driller_malloc_restore(void){
 	__free_hook = old_free_hook;
 	__realloc_hook = old_realloc_hook;
 	__memalign_hook = old_memalign_hook;
+
+	driller_malloc_installed = 0;
 }
 
 /******************/
@@ -567,7 +572,7 @@ void *mmap(void *start, size_t length, int prot, int flags,
 	int new_flags;
 	int errno_sav;
 
-	if(!driller_initialized
+	if(!driller_initialized || driller_malloc_installed
 	   || !(flags & MAP_ANONYMOUS)
 	   || !(prot & PROT_READ) ) {
 		rc = old_mmap(start, length, prot, flags, fd, offset);
@@ -612,7 +617,7 @@ out:
 int munmap(void *start, size_t length) {
 	int rc, errno_sav;
 
-	if(!driller_initialized) {
+	if(!driller_initialized || driller_malloc_installed) {
 		rc = old_munmap(start, length);
 		errno_sav = errno;
 		goto out_ret;
@@ -642,7 +647,7 @@ void * mremap(void *old_address, size_t old_size ,
 	struct map_rec key;
 	struct map_rec *map, **mptr;
 
-	if(!driller_initialized) {
+	if(!driller_initialized || driller_malloc_installed) {
 		rc = old_mremap(old_address, old_size, new_size, flags);
 		errno_sav = errno;
 		goto out;

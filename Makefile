@@ -34,10 +34,10 @@ clean:
 check: $(progs)
 	set -x; \
 	for p in $(progs); do \
-		sh $$p.sh ; \
+		bash $$p.sh ; \
 	done
 
 htags:
-	htags -aDfFgns
+	htags -Fgns
 
 .PHONY: clean check htags
