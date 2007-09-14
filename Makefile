@@ -2,10 +2,11 @@
 #GCOV_FLAGS := -fprofile-arcs -ftest-coverage -O0
 #DEBUG_FLAGS := -O0 -D DEBUG
 #ASSERT_FLAGS := -D NDEBUG
+LFS_FLAGS := $(shell getconf LFS_CFLAGS)
 
 CC := gcc
 CFLAGS := -Wall -O3 -g $(GCOV_FLAGS) $(DEBUG_FLAGS)
-CPPFLAGS := -D _GNU_SOURCE $(ASSERT_FLAGS)
+CPPFLAGS := -D _GNU_SOURCE $(ASSERT_FLAGS) $(LFS_FLAGS)
 
 LD := gcc
 LDFLAGS := $(GCOV_FLAGS)

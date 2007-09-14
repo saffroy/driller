@@ -20,6 +20,7 @@
 #include <sys/resource.h>
 #include <search.h>
 #include <stdarg.h>
+#include <stdint.h>
 
 #include "driller.h"
 #include "driller_internal.h"
@@ -161,7 +162,7 @@ static int map_cmp(const void *a, const void *b) {
  * record a description of a memory segment that is/will become
  * a file-backed memory mapping - uses tsearch(3)
  */
-static void map_record(off_t start, off_t end, int prot, off_t offset,
+static void map_record(void *start, void *end, int prot, off_t offset,
 		       char *path, int fd) {
 	struct map_rec *map;
 	void *rc;
@@ -170,7 +171,7 @@ static void map_record(off_t start, off_t end, int prot, off_t offset,
 		/* ignore gate page */
 		return;
 #if __i386__
-	if(start == 0xffffe000)
+	if(start == (void*)0xffffe000)
 		/* not sure what it is: gate page? */
 		return;
 #endif
@@ -217,7 +218,7 @@ static void map_parse(void)
 	const char *file = "/proc/self/maps";
 	int fd;
 	char buf[4096] = {};
-	off_t start, end, offset;
+	uintmax_t start, end, offset;
 	char prot_str[5];
 	long maj, min, ino;
 	char *line, *p;
@@ -239,7 +240,7 @@ static void map_parse(void)
 
 	line = buf;
 	for(lineno = 0; ; lineno++) {
-		if(sscanf(line, "%lx-%lx %s %lx %lx:%lx %ld", 
+		if(sscanf(line, "%jx-%jx %s %jx %lx:%lx %ld", 
 			  &start, &end, prot_str, &offset,
 			  &maj, &min, &ino) != 7) {
 			p = strchrnul(line, '\n');
@@ -255,13 +256,15 @@ static void map_parse(void)
 			p++;
 		line = strchrnul(p, '\n');
 		*line++ = '\0'; /* remove trailing \n */
-		dbg("% 2d: %lx-%lx %s %lx %lx:%lx %ld '%s'\n",
+		dbg("% 2d: %jx-%jx %s %jx %lx:%lx %ld '%s'\n",
 		    lineno, start, end, prot_str, offset, maj, min, ino, p);
 		prot = ((prot_str[0] == 'r') ? PROT_READ : 0)
 			| ((prot_str[1] == 'w') ? PROT_WRITE : 0)
 			| ((prot_str[2] == 'x') ? PROT_EXEC : 0);
 		if(prot_str[3] == 'p') /* private mapping */
-			map_record(start, end, prot, offset, p, -1);
+			map_record((void*)(uintptr_t)start,
+				   (void*)(uintptr_t)end,
+				   prot, offset, p, -1);
 		if(*line == '\0')
 			return;
 	}
@@ -288,7 +291,7 @@ static void map_overload(void *start, size_t length, int prot, int flags,
  * overloading the stack requires running this function from a separate stack
  */
 static void map_overload_stack(void) {
-	off_t size;
+	uintptr_t size;
 	int rc;
 
 	/* we're on a separate stack, but globals are still here */
@@ -306,18 +309,18 @@ static void map_overload_stack(void) {
 	if(rc < size)
 		err("short write (%d instead of %zd)", rc, size);
 
-	map_overload((void*)map_stack->start, size, map_stack->prot,
+	map_overload(map_stack->start, size, map_stack->prot,
 		     MAP_SHARED | MAP_FIXED, map_stack->fd,
 		     map_stack->offset, 0);
-	dbg("remapped stack at %lx", map_stack->start);
+	dbg("remapped stack at %p", map_stack->start);
 }
 
 /*
  * return the page offset of the current stack pointer
  */
-static inline long stack_base(void) {
-        unsigned long sp;
-	unsigned long mask = ~((unsigned long)page_size-1);
+static inline void *stack_base(void) {
+        uintptr_t sp;
+	uintptr_t mask = ~((uintptr_t)page_size-1);
 
 #if __x86_64__
 	asm volatile ("movq %%rsp,%0" : "=r"(sp));
@@ -326,7 +329,7 @@ static inline long stack_base(void) {
 #else
 #error function stack_base needs porting to your architecture!
 #endif
-        return sp & mask;
+        return (void*)(sp & mask);
 }
 
 /*
@@ -350,8 +353,8 @@ static void run_altstack(void (*f)(void), void *stack, long stack_size) {
  * SIGSEGV handler used to grow the stack on demand
  */
 static void segv_sigaction(int signum, siginfo_t *si, void *uctx) {
-	off_t addr = (off_t)si->si_addr;
-	off_t size;
+	void *addr = si->si_addr;
+	size_t size;
 	void *rc;
 	struct rlimit rl;
 	int errno_sav = errno;
@@ -363,8 +366,8 @@ static void segv_sigaction(int signum, siginfo_t *si, void *uctx) {
 		goto out_raise;
 
 	/* grow stack by at least STACK_MIN_GROW */
-	map_stack->start = min((addr & ~((unsigned long)page_size - 1)),
-			       map_stack->start - STACK_MIN_GROW);
+	addr = (void*)((uintptr_t)addr & ~((unsigned long)page_size - 1));
+	map_stack->start = min(addr, map_stack->start - STACK_MIN_GROW);
 	size = map_stack->end - map_stack->start;
 	map_stack->offset = STACK_MAP_OFFSET - size;
 
@@ -375,12 +378,12 @@ static void segv_sigaction(int signum, siginfo_t *si, void *uctx) {
 		goto out_raise;
 	}
 
-	rc = mmap((void*)map_stack->start, size, map_stack->prot,
+	rc = mmap(map_stack->start, size, map_stack->prot,
 		  MAP_SHARED | MAP_FIXED, map_stack->fd,
 		  map_stack->offset);
 	if(rc == MAP_FAILED)
 		perr("mmap");
-	dbg("stack grows to %lx", map_stack->start);
+	dbg("stack grows to %p", map_stack->start);
 	errno = errno_sav;
 	return;
 
@@ -432,7 +435,7 @@ static void map_rebuild(struct map_rec *map, int index) {
 	stack_t ss;
 	struct sigaction sa;
 
-	dbg("rebuild %d: %lx %s", index, map->start, map->path);
+	dbg("rebuild %d: %p %s", index, map->start, map->path);
 	if(strcmp(map->path, "[heap]") == 0)
 		type = OVERLOAD_HEAP;
 	else if(strcmp(map->path, "[stack]") == 0)
@@ -451,8 +454,8 @@ static void map_rebuild(struct map_rec *map, int index) {
 	case OVERLOAD_HEAP:
 		/* allocations after map_parse() could have extended the
 		   heap limit, so reread it; and avoid any further alloc */
-		map->end = (off_t)sbrk(0);
-		dbg("switching to new heap: %lx-%lx", map->start, map->end);
+		map->end = sbrk(0);
+		dbg("switching to new heap: %p-%p", map->start, map->end);
 		map_heap = map;
 		/* FALL THROUGH */
 
@@ -469,7 +472,7 @@ static void map_rebuild(struct map_rec *map, int index) {
 			err("short write (%d instead of %zd)", rc, size);
 
 		/* map file over original area */
-		map_overload((void*)map->start, size, map->prot,
+		map_overload(map->start, size, map->prot,
 			     MAP_SHARED | MAP_FIXED, map->fd, map->offset,
 			     (type == OVERLOAD_HEAP) );
 		break;
@@ -478,7 +481,7 @@ static void map_rebuild(struct map_rec *map, int index) {
 		map_stack = map;
 		//XXX stack may grow after map_parse - but how much??
 		map_stack->start = min(stack_base(), map_stack->start);
-		dbg("switching to new stack: %lx-%lx", map->start, map->end);
+		dbg("switching to new stack: %p-%p", map->start, map->end);
 
 		/* overload current stack: use alternate stack */
 		altstack = malloc(ALTSTACK_SIZE);
@@ -505,12 +508,12 @@ static void map_rebuild(struct map_rec *map, int index) {
  * trim or destroy the descriptions of memory segments
  * that were affected by a map or unmap operation
  */
-static void map_invalidate_range(off_t start, off_t end) {
+static void map_invalidate_range(void *start, void *end) {
 	struct map_rec *map;
 
 	/* loop over all maps that intersect with [start-end] */
 	while(1) {
-		map = driller_lookup_map((void*)start, (size_t)(end-start));
+		map = driller_lookup_map(start, end-start);
 		if(map == NULL)
 			return;
 
@@ -539,7 +542,7 @@ static void map_invalidate_range(off_t start, off_t end) {
 
 		/* map needs trimming */
 		if(start <= map->start) {
-			off_t new_start;
+			void *new_start;
 
 			/* trim the start */
 			new_start = min(end, map->end);
@@ -599,12 +602,12 @@ void *mmap(void *start, size_t length, int prot, int flags,
 		goto out;
 	}
 
-	map_invalidate_range((off_t)rc, (off_t)rc + length);
-	map_record((off_t)rc, (off_t)rc + length, prot, offset, "", fd);
+	map_invalidate_range(rc, rc + length);
+	map_record(rc, rc + length, prot, offset, "", fd);
 out:
 	driller_malloc_restore();
 
-	dbg("mmap(%p, %ld, 0x%x, 0x%x, %d, %ld) = %p %s",
+	dbg("mmap(%p, %zd, 0x%x, 0x%x, %d, %ld) = %p %s",
 	    start, length, prot, flags, fd, offset, rc,
 	    rc == MAP_FAILED ? strerror(errno_sav) : "");
 	errno = errno_sav;
@@ -628,11 +631,11 @@ int munmap(void *start, size_t length) {
 	rc = old_munmap(start, length);
 	errno_sav = errno;
 	if(rc == 0)
-		map_invalidate_range((off_t)start, (off_t)start + length);
+		map_invalidate_range(start, start + length);
 
 	driller_malloc_restore();
 out_ret:
-	dbg("munmap(%p, %ld) = %d", start, length, rc);
+	dbg("munmap(%p, %zd) = %d", start, length, rc);
 	errno = errno_sav;
 	return rc;
 }
@@ -662,7 +665,7 @@ void * mremap(void *old_address, size_t old_size ,
 	assert((flags & ~MREMAP_MAYMOVE) == 0);
 
 	/* identify affected mapping */
-	key.start = (off_t)old_address;
+	key.start = old_address;
 	key.end = key.start + old_size;
 
 	mptr = tfind(&key, &map_root, map_cmp);
@@ -696,7 +699,7 @@ do_remap:
 		driller_malloc_install();
 		rc = tdelete(map, &map_root, map_cmp);
 		assert(rc != NULL);
-		map->start = (off_t)rc;
+		map->start = rc;
 		map->end = map->start + new_size;
 		rc = tsearch((void *)map, &map_root, map_cmp);
 		assert(rc != NULL);
@@ -704,7 +707,7 @@ do_remap:
 	}
 
 out:
-	dbg("mremap(%p, %ld, %ld, %x) = %p",
+	dbg("mremap(%p, %zd, %zd, %x) = %p",
 	    old_address, old_size, new_size, flags, rc);
 	errno = errno_sav;
 	return rc;
@@ -715,19 +718,19 @@ out:
  * grow the memory map used for the heap
  */
 static int driller_brk(void *end_data_segment){
-	off_t new_size;
+	uintptr_t new_size;
 
-	if((off_t)end_data_segment == map_heap->end)
+	if(end_data_segment == map_heap->end)
 		return 0;
-	if((off_t)end_data_segment <= map_heap->start)
+	if(end_data_segment <= map_heap->start)
 		return 0;
-	new_size = (off_t)end_data_segment - map_heap->start;
+	new_size = end_data_segment - map_heap->start;
 	if(ftruncate(map_heap->fd, map_heap->offset + new_size) != 0)
 		perr("ftruncate");
-	if(mremap((void*)map_heap->start, map_heap->end - map_heap->start,
+	if(mremap(map_heap->start, map_heap->end - map_heap->start,
 		  new_size, 0) == MAP_FAILED)
 		perr("mremap");
-	map_heap->end = (off_t)end_data_segment;
+	map_heap->end = end_data_segment;
 	dbg("heap end moves to %p", end_data_segment);
 	return 0;
 }
@@ -748,7 +751,7 @@ int brk(void *end_data_segment){
 static void *driller_sbrk(intptr_t increment){
 	void *old_brk;
 
-	old_brk = (void*)map_heap->end;
+	old_brk = map_heap->end;
 	if(increment == 0)
 		return old_brk;
 	if(driller_brk(old_brk + increment) == 0)
@@ -847,7 +850,7 @@ void driller_register_map_invalidate_cb(void (*f)(struct map_rec *map)) {
 struct map_rec *driller_lookup_map(void *start, size_t length) {
 	struct map_rec key, **mptr;
 
-	key.start = (off_t)start;
+	key.start = start;
 	key.end = key.start + length;
 	mptr = tfind(&key, &map_root, map_cmp);
 	if(mptr == NULL)

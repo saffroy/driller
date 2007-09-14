@@ -11,8 +11,8 @@
 #define DRILLER_H
 
 struct map_rec {
-	off_t start;
-	off_t end;
+	void *start;
+	void *end;
 	int prot;
 	off_t offset;
 	char *path;

@@ -27,8 +27,7 @@ void f(int n) {
 
 #ifndef NODRILL
 static void map_invalidate(struct map_rec *map) {
-	printf("map invalidate: Ox%lx-0x%lx\n",
-	       map->start, map->end);
+	printf("map invalidate: %p-%p\n", map->start, map->end);
 }
 #endif
 

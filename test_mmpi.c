@@ -17,8 +17,8 @@
 #include "mmpi.h"
 #include "log.h"
 
-#define THRTEST_CHUNK_SIZE (1UL << 15) /* 32 kB */
-#define THRTEST_VOLUME (1UL << 32) /* 4 GB */
+#define THRTEST_CHUNK_SIZE (1ULL << 15) /* 32 kB */
+#define THRTEST_VOLUME (1ULL << 32) /* 4 GB */
 #define THRTEST_CHUNK_COUNT (THRTEST_VOLUME/THRTEST_CHUNK_SIZE)
 
 static void usage(char *progname) {
@@ -134,7 +134,7 @@ int main(int argc, char**argv) {
 		struct timeval tv1, tv2;
 		float delta;
 
-		printf("now time send/recv throughput (%ld MB in %ldkB chunks)...\n", 
+		printf("now time send/recv throughput (%lld MB in %lldkB chunks)...\n", 
 		       THRTEST_VOLUME >> 20, THRTEST_CHUNK_SIZE >> 10);
 		gettimeofday(&tv1, NULL);
 

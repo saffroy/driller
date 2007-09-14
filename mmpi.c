@@ -52,7 +52,7 @@ static inline struct list_head *list_prev(struct list_head *item) {
 }
 
 static inline
-off_t list_offset(struct list_head *left, struct list_head *right) {
+intptr_t list_offset(struct list_head *left, struct list_head *right) {
 	return (char*)right - (char*)left;
 }
 
@@ -295,8 +295,8 @@ static void mmpi_send_driller(int dest_rank, void *buf, size_t size) {
 		mmpi_send_frags(dest_rank, buf, size);
 		return;
 	}
-	assert(map->start <= (off_t)buf);
-	assert(map->end >= (off_t)buf + size);
+	assert(map->start <= buf);
+	assert(map->end >= buf + size);
 
 	/* send the fd to fdproxy if not already done */
 	if(map->user_data == NULL) {
@@ -319,7 +319,7 @@ static void mmpi_send_driller(int dest_rank, void *buf, size_t size) {
 	m->m_type = MSG_DRILLER;
 	memcpy(&m->m_drill.map, map, sizeof(*map));
 	memcpy(&m->m_drill.key, key, sizeof(*key));
-	m->m_drill.offset = (off_t)buf - map->start;
+	m->m_drill.offset = buf - map->start;
 	m->m_drill.length = size;
 	m->m_size = sizeof(struct driller_payload);
 

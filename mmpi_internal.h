@@ -34,7 +34,7 @@ struct list_head {
 #ifndef NDEBUG
 	int magic;
 #endif
-	off_t off_next, off_prev;
+	intptr_t off_next, off_prev;
 };
 
 /*
