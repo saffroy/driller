@@ -77,7 +77,7 @@ int main(int argc, char**argv) {
 
 		printf("%d: send to %d\n", rank, 0);
 		for(i = 0; i < iter; i++)
-			mmpi_send(0, (char*)&rank, sizeof(rank));
+			mmpi_send(0, &rank, sizeof(rank));
 	} else {
 		int i, j;
 		struct timeval tv1, tv2;
@@ -93,7 +93,7 @@ int main(int argc, char**argv) {
 
 			printf("%d: recv from %d\n", rank, j);
 			for(i = 0; i < iter; i++) {
-				mmpi_recv(j, (char*)&r, &sz);
+				mmpi_recv(j, &r, &sz);
 				assert(sz == sizeof(r));
 				assert(r == j);
 			}
@@ -109,7 +109,10 @@ int main(int argc, char**argv) {
 	mmpi_barrier();
 
 	/* test throughput */
+
 #if 1
+	/* increase the odds that buf is allocated with mmap
+	 * (it won't be if there is enough free space in the heap) */
 	mallopt(M_MMAP_THRESHOLD, THRTEST_CHUNK_SIZE);
 #endif
 	buf = malloc(THRTEST_CHUNK_SIZE);
@@ -121,15 +124,20 @@ int main(int argc, char**argv) {
 #if 0
 			memset(buf, (char)i, THRTEST_CHUNK_SIZE);
 #else
+			/* we don't necessarily want to benchmark memset */
 			buf[0] = buf[THRTEST_CHUNK_SIZE-1] = (char)i;
 #endif
+
 			mmpi_send(0, buf, THRTEST_CHUNK_SIZE);
-#if 1
+
+#if 0
+			/* if buf is allocated with mmap, this will force
+			 * invalidation of the fd and its memory mapping */
 			free(buf);
 			buf = malloc(THRTEST_CHUNK_SIZE);		
 #endif
 		}
-	} else {
+	} else { /* in rank 0 */
 		int i, j;
 		struct timeval tv1, tv2;
 		float delta;
@@ -150,7 +158,7 @@ int main(int argc, char**argv) {
 			}
 		}
 		gettimeofday(&tv2, NULL);
-		delta = (float)(tv2.tv_usec - tv1.tv_usec) / 1000000
+		delta = (float)(tv2.tv_usec - tv1.tv_usec) / 1E6
 			+ (float)(tv2.tv_sec - tv1.tv_sec);
 		printf("average send/recv throughput: %.2f MB/s (%.2fs)\n",
 		       (float)((nprocs-1) * THRTEST_VOLUME >> 20) / delta,

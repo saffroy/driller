@@ -104,22 +104,20 @@ Cons
  * stack growth costs signal + 2 syscalls (mmap + getrlimit)
    mitigated by stack growth granularity
    could save call to getrlimit
+   could save call to mmap by mapping a lot in advance and handling sigbus
+   this would mean no signal, no control of getrlimit
  * not thread safe (yet)
  * not sure if it breaks some libs (qx, ib), may be worked around (blacklist)
  * some linuxisms limit OS portability:
    credentials over unix sockets (optional)
    abstract namespace for unix sockets (easier cleanup)
    parse /proc/self/maps
- * some housekeeping needed to keep track of new segments; need to check
-   if a thread is needed to handle unix socket comms while process is busy
  * could use many file descriptors when malloc calls mmap, unless we
    use a single fd for most maps (ie. those starting at TASK_UNMAPPED_BASE)
    this will require an allocator
    see also notes above
- * brk can no longer grow the heap
-   malloc uses mmap areas instead; can be improved by overloading brk
-   brk overloaded, so it's ok
- * brk costs 2 syscalls instead of one (ftruncate + mmap)
+ * brk costs 2 syscalls (ftruncate + mmap) vs. 1
+   could save call to mmap by mapping a lot in advance
  * malloc of mmap'ed area costs 3 syscalls (open + ftruncate + mmap) vs. 1
    could be mitigated by fd cache
  * free of mmap'ed area costs 3 syscalls (munmap + ftruncate + close) vs. 1

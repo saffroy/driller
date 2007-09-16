@@ -1,1 +1,5 @@
 - README
+- mmpi: per-sibling recvq for better perf on more than 2 cores
+- fdproxy: credentials?
+- use brk and stack ptr to identify heap and stack segments
+

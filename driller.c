@@ -303,7 +303,7 @@ static void map_overload_stack(void) {
 		perr("lseek");
 
 	/* copy mapped area to file */
-	rc = write(map_stack->fd, (char*)map_stack->start, size);
+	rc = write(map_stack->fd, map_stack->start, size);
 	if(rc < 0)
 		perr("write");
 	if(rc < size)
@@ -465,7 +465,7 @@ static void map_rebuild(struct map_rec *map, int index) {
 		/* copy mapped area to file */
 		if(lseek(map->fd, map->offset, SEEK_SET) < 0)
 			perr("lseek");
-		rc = write(map->fd, (char*)map->start, size);
+		rc = write(map->fd, map->start, size);
 		if(rc < 0)
 			perr("write");
 		if(rc < size)

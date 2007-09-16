@@ -1,0 +1,95 @@
+The Driller lib
+---------------
+
+The set of files in this tarball implement a way for a group of
+cooperating processes to directly access memory segments of one
+another. This can form the basis of a message passing system that
+avoids costly data copy, as is demonstrated with mmpi ("mini-MPI), a
+very simple API loosely inspired from MPI (it only has send, recv and
+barrier primitives).
+
+The name "driller" comes from the idea that we could drill holes in
+the closed container that forms the memory of a regular process.
+
+The code has been designed for Linux and tested on 2.6 only, though
+it might be portable to some Unix variants. It has small portions of
+architecture specific code, but has been tested on x86 and x64, and
+it should not be difficult to port to other architectures.
+
+How to test it
+--------------
+
+ - run "make" to build all library files and tests, or
+   "make DEBUG_FLAGS=-DDEBUG" for more verbose output during tests
+ - run "./test_driller.sh" for a basic sanity test
+ - run "./test_mmpi.sh" for a performance test with mmpi
+
+How it works
+------------
+
+The code uses the following tricks to achieve its goals:
+
+ - under Linux, a process can examine the layout of its own memory
+ space by reading /proc/self/maps (on Linux 2.6, the stack and heap
+ are clearly identified)
+
+ - an existing memory segment can be atomically replaced by a call to
+ mmap at the same address; thus, we can copy an existing segment to a
+ file, and then map this file over the original segment, which gives
+ us the same data, except it is now in a file
+
+ - unix sockets can be used to pass file descriptors from one process
+ to another; for example one created with the trick above, so another
+ process can map the same segment in its own memory space
+
+ - under Linux, memory is usually allocated by calling malloc (in the
+ C library) or mmap, both of which can be intercepted (using malloc
+ hooks and symbol overloading); this means that these memory segments
+ can be memory-mapped files if we want them to
+
+These tricks make it possible for a process to simply replace most of
+its memory segments by memory-mapped files. The file descriptors for
+al replaced regions can then be passed to cooperating process, which,
+after an mmap(), can directly access the same memory. When the first
+process modifies or destroys its mapping, this is notified to other
+processes, which will drop any reference to the file and eventually
+free associated ressources.
+
+The code implementing these mechanisms is split in three parts:
+ - fdproxy.c: this implements file descriptor passing; one of the
+ participants forks a server process that will forward file
+ descriptors to any client
+ - driller.c: this replaces the memory segments of a process with
+ memory-mapped files, and tracks calls to mmap or brk, which modify
+ the process memory layout
+ - map_cache.c: this provides a cache structure for memory segments
+ that a process can have remapped from another process
+
+Since the glibc implementation of malloc cannot be forced to use our
+overloaded version of mmap, an alternate allocator had to be used, and
+Doug Lea's malloc in dlmalloc.c is a convenient substitute.
+
+The file mmpi.c implements a very simple message passing API that uses
+the files above and requires at most one buffer copy to transfer a
+message. Of course, the cost of a few system calls cannot always be
+avoided, but in favorable cases, it can be spread over many messages.
+
+Licensing
+---------
+
+The files dlmalloc.c and dlmalloc.h are released by Doug Lea to the
+public domain.
+
+All other files were written by Jean-Marc Saffroy and are released as
+free software, distributed under the terms of the GNU General Public
+License version 2.
+
+Contact
+-------
+
+Jean-Marc Saffroy <saffroy@gmail.com>
+
+Acknowledgements
+----------------
+
+Thanks to Gaël Roualland for testing and debugging this code on IA32.
