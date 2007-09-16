@@ -29,6 +29,9 @@ dlmalloc.o driller.o: CPPFLAGS += -D MSPACES
 
 test_driller test_mmpi test_fdproxy: LDFLAGS += -ldl
 
+test_dlmalloc.c:
+	ln -s test_driller.c $@
+
 clean:
 	$(RM) *.o $(progs) *.gcov *.gcda *.gcno core.* strace-*
 
