@@ -17,9 +17,9 @@
 #include "mmpi.h"
 #include "log.h"
 
-#define THRTEST_CHUNK_SIZE (1ULL << 15) /* 32 kB */
-#define THRTEST_VOLUME (1ULL << 32) /* 4 GB */
-#define THRTEST_CHUNK_COUNT (THRTEST_VOLUME/THRTEST_CHUNK_SIZE)
+#define THRTEST_MIN_CHUNK_SIZE (1ULL << 5) /* 32 bytes */
+#define THRTEST_MAX_CHUNK_SIZE (1ULL << 23) /* 8 MB */
+#define THRTEST_VOLUME (1ULL << 26) /* 64 MB */
 
 static void usage(char *progname) {
 	err("usage: %s <job id> <job size> <rank> <iter>", progname);
@@ -113,56 +113,66 @@ int main(int argc, char**argv) {
 #if 1
 	/* increase the odds that buf is allocated with mmap
 	 * (it won't be if there is enough free space in the heap) */
-	mallopt(M_MMAP_THRESHOLD, THRTEST_CHUNK_SIZE);
+	mallopt(M_MMAP_THRESHOLD, THRTEST_MAX_CHUNK_SIZE);
 #endif
-	buf = malloc(THRTEST_CHUNK_SIZE);
+	buf = malloc(THRTEST_MAX_CHUNK_SIZE);
 	if(rank != 0) {
-		int i;
+		int i, size, count;
 
-		printf("%d: send to %d\n", rank, 0);
-		for(i = 0; i < THRTEST_CHUNK_COUNT; i++) {
+		for(size = THRTEST_MIN_CHUNK_SIZE;
+		    size < THRTEST_MAX_CHUNK_SIZE; size <<= 1) {
+			count = THRTEST_VOLUME / size;
+			for(i = 0; i < count; i++) {
 #if 0
-			memset(buf, (char)i, THRTEST_CHUNK_SIZE);
+				memset(buf, (char)i, size);
 #else
-			/* we don't necessarily want to benchmark memset */
-			buf[0] = buf[THRTEST_CHUNK_SIZE-1] = (char)i;
+				/* we don't necessarily want to benchmark memset */
+				buf[0] = buf[size-1] = (char)i;
 #endif
 
-			mmpi_send(0, buf, THRTEST_CHUNK_SIZE);
+				mmpi_send(0, buf, size);
 
 #if 0
-			/* if buf is allocated with mmap, this will force
-			 * invalidation of the fd and its memory mapping */
-			free(buf);
-			buf = malloc(THRTEST_CHUNK_SIZE);		
+				/* if buf is allocated with mmap, this will force
+				 * invalidation of the fd and its memory mapping */
+				free(buf);
+				buf = malloc(size);
 #endif
+			}
+			mmpi_barrier();
 		}
 	} else { /* in rank 0 */
-		int i, j;
+		int i, j, size, count;
 		struct timeval tv1, tv2;
 		float delta;
 
-		printf("now time send/recv throughput (%lld MB in %lldkB chunks)...\n", 
-		       THRTEST_VOLUME >> 20, THRTEST_CHUNK_SIZE >> 10);
-		gettimeofday(&tv1, NULL);
+		printf("now time send/recv throughput (%lld MB per iteration)...\n", 
+		       THRTEST_VOLUME >> 20);
 
-		for(j = 1; j < nprocs; j++) {
-			size_t sz;
+		for(size = THRTEST_MIN_CHUNK_SIZE;
+		    size < THRTEST_MAX_CHUNK_SIZE; size <<= 1) {
+			count = THRTEST_VOLUME / size;
 
-			printf("%d: recv from %d\n", rank, j);
-			for(i = 0; i < THRTEST_CHUNK_COUNT; i++) {
-				mmpi_recv(j, buf, &sz);
-				assert(sz == THRTEST_CHUNK_SIZE);
-				assert(buf[0] == (char)i);
-				assert(buf[THRTEST_CHUNK_SIZE-1] == (char)i);
+			gettimeofday(&tv1, NULL);
+			for(j = 1; j < nprocs; j++) {
+				size_t sz;
+
+				//printf("%d: recv from %d\n", rank, j);
+				for(i = 0; i < count; i++) {
+					mmpi_recv(j, buf, &sz);
+					assert(sz == size);
+					assert(buf[0] == (char)i);
+					assert(buf[size-1] == (char)i);
+				}
 			}
+			gettimeofday(&tv2, NULL);
+			delta = (float)(tv2.tv_usec - tv1.tv_usec) / 1E6
+				+ (float)(tv2.tv_sec - tv1.tv_sec);
+			printf("throughput: %6.1f MB/s (%.2fs) chunk % 8d\n",
+			       (float)((nprocs-1) * (THRTEST_VOLUME >> 20)) / delta,
+			       delta, size);
+			mmpi_barrier();
 		}
-		gettimeofday(&tv2, NULL);
-		delta = (float)(tv2.tv_usec - tv1.tv_usec) / 1E6
-			+ (float)(tv2.tv_sec - tv1.tv_sec);
-		printf("average send/recv throughput: %.2f MB/s (%.2fs)\n",
-		       (float)((nprocs-1) * THRTEST_VOLUME >> 20) / delta,
-		       delta);
 	}
 	free(buf);
 
