@@ -590,7 +590,7 @@ void *mmap(void *start, size_t length, int prot, int flags,
 		errno_sav = errno;
 		if(close(fd) != 0)
 			perr("close");
-		goto out;
+		goto out_restore;
 	}
 
 	new_flags = (flags & ~(MAP_ANONYMOUS|MAP_PRIVATE)) | MAP_SHARED;
@@ -599,14 +599,14 @@ void *mmap(void *start, size_t length, int prot, int flags,
 	if(rc == MAP_FAILED) {
 		if(close(fd) != 0)
 			perr("close");
-		goto out;
+		goto out_restore;
 	}
 
 	map_invalidate_range(rc, rc + length);
 	map_record(rc, rc + length, prot, offset, "", fd);
-out:
+out_restore:
 	driller_malloc_restore();
-
+out:
 	dbg("mmap(%p, %zd, 0x%x, 0x%x, %d, %ld) = %p %s",
 	    start, length, prot, flags, fd, offset, rc,
 	    rc == MAP_FAILED ? strerror(errno_sav) : "");
