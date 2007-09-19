@@ -17,9 +17,9 @@
 #include "mmpi.h"
 #include "log.h"
 
-#define THRTEST_MIN_CHUNK_SIZE (1ULL << 5) /* 32 bytes */
+#define THRTEST_MIN_CHUNK_SIZE (1ULL << 8) /* 256 bytes */
 #define THRTEST_MAX_CHUNK_SIZE (1ULL << 23) /* 8 MB */
-#define THRTEST_VOLUME (1ULL << 26) /* 64 MB */
+#define THRTEST_VOLUME (1ULL << 27) /* 128 MB */
 
 static void usage(char *progname) {
 	err("usage: %s <job id> <job size> <rank> <iter>", progname);
@@ -120,7 +120,7 @@ int main(int argc, char**argv) {
 		int i, size, count;
 
 		for(size = THRTEST_MIN_CHUNK_SIZE;
-		    size < THRTEST_MAX_CHUNK_SIZE; size <<= 1) {
+		    size <= THRTEST_MAX_CHUNK_SIZE; size <<= 1) {
 			count = THRTEST_VOLUME / size;
 			for(i = 0; i < count; i++) {
 #if 0
@@ -150,7 +150,7 @@ int main(int argc, char**argv) {
 		       THRTEST_VOLUME >> 20);
 
 		for(size = THRTEST_MIN_CHUNK_SIZE;
-		    size < THRTEST_MAX_CHUNK_SIZE; size <<= 1) {
+		    size <= THRTEST_MAX_CHUNK_SIZE; size <<= 1) {
 			count = THRTEST_VOLUME / size;
 
 			gettimeofday(&tv1, NULL);

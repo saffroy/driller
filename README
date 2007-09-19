@@ -24,6 +24,56 @@ How to test it
  - run "./test_driller.sh" for a basic sanity test
  - run "./test_mmpi.sh" for a performance test with mmpi
 
+This performance test measures the throughput between two processes
+for various buffer sizes and a constant volume. Results are usually as
+follows (on a dual core Athlon64 X2 3800+):
+
+now time send/recv throughput (128 MB per iteration)...
+throughput:  108.8 MB/s (1.18s) chunk      256
+throughput:  305.3 MB/s (0.42s) chunk      512
+throughput:  563.6 MB/s (0.23s) chunk     1024
+throughput:  802.7 MB/s (0.16s) chunk     2048
+throughput: 1604.5 MB/s (0.08s) chunk     4096
+throughput: 2249.5 MB/s (0.06s) chunk     8192
+throughput: 4254.0 MB/s (0.03s) chunk    16384
+throughput: 5238.8 MB/s (0.02s) chunk    32768
+throughput: 2686.8 MB/s (0.05s) chunk    65536
+throughput: 2939.2 MB/s (0.04s) chunk   131072
+throughput: 1587.3 MB/s (0.08s) chunk   262144
+throughput:  988.8 MB/s (0.13s) chunk   524288
+throughput: 1042.3 MB/s (0.12s) chunk  1048576
+throughput: 1056.6 MB/s (0.12s) chunk  2097152
+throughput: 1057.7 MB/s (0.12s) chunk  4194304
+throughput: 1020.2 MB/s (0.13s) chunk  8388608
+
+Performance is not very stable over successive runs, for now I suspect
+that mmpi is too sensitive to other tasks being scheduled (tests are
+performed on a workstation running quite a few interactive programs
+under X11).
+
+A similar test on the same host with MPICH2 1.0.6 gives this:
+
+now time send/recv throughput (128 MB per iteration)...
+throughput:  261.7 MB/s (0.49s) chunk      256
+throughput:  354.6 MB/s (0.36s) chunk      512
+throughput:  425.8 MB/s (0.30s) chunk     1024
+throughput:  480.7 MB/s (0.27s) chunk     2048
+throughput:  507.4 MB/s (0.25s) chunk     4096
+throughput:  526.5 MB/s (0.24s) chunk     8192
+throughput:  375.4 MB/s (0.34s) chunk    16384
+throughput:  405.9 MB/s (0.32s) chunk    32768
+throughput:  428.4 MB/s (0.30s) chunk    65536
+throughput:  444.9 MB/s (0.29s) chunk   131072
+throughput:  447.3 MB/s (0.29s) chunk   262144
+throughput:  451.6 MB/s (0.28s) chunk   524288
+throughput:  446.8 MB/s (0.29s) chunk  1048576
+throughput:  456.6 MB/s (0.28s) chunk  2097152
+throughput:  449.3 MB/s (0.28s) chunk  4194304
+throughput:  448.4 MB/s (0.29s) chunk  8388608
+
+The results with MPICH2 are more stable over successive runs, but much
+lower for chunk sizes above 4KB.
+
 How it works
 ------------
 
