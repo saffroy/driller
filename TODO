@@ -1,3 +1,4 @@
+- LGPL license
 - README
 - mmpi: per-sibling recvq for better perf on more than 2 cores
 - fdproxy: credentials?

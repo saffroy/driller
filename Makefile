@@ -5,6 +5,7 @@ ASSERT_FLAGS := -D NDEBUG
 LFS_FLAGS := $(shell getconf LFS_CFLAGS)
 
 CC := gcc
+export CC
 CFLAGS := -Wall -O3 -g $(GCOV_FLAGS) $(DEBUG_FLAGS)
 CPPFLAGS := -D _GNU_SOURCE $(ASSERT_FLAGS) $(LFS_FLAGS)
 
@@ -12,13 +13,23 @@ LD := gcc
 LDFLAGS := $(GCOV_FLAGS)
 
 progs := test_mmpi test_fdproxy test_driller test_dlmalloc test_spinlock
-libobjs :=  mmpi.o fdproxy.o driller.o dlmalloc.o map_cache.o
+libobjs := fdproxy.o driller.o dlmalloc.o map_cache.o
+objs := $(progs:%=%.o) $(libobjs)
+deps := $(objs:%.o=%.d)
 
 all: $(progs)
 
-test_mmpi: test_mmpi.o $(libobjs)
-test_fdproxy: test_fdproxy.o $(libobjs)
-test_driller: test_driller.o driller.o dlmalloc.o
+-include $(deps)
+
+%.d: %.c
+	./depend.sh $@ $(CPPFLAGS) $<
+
+driller.a: $(libobjs)
+	$(AR) r $@ $^
+
+test_mmpi: test_mmpi.o mmpi.o driller.a
+test_fdproxy: test_fdproxy.o mmpi.o driller.a
+test_driller: test_driller.o driller.a
 test_dlmalloc: test_dlmalloc.o dlmalloc.o
 test_spinlock: test_spinlock.o
 
@@ -33,12 +44,12 @@ test_dlmalloc.c:
 	ln -s test_driller.c $@
 
 clean:
-	$(RM) *.o $(progs) *.gcov *.gcda *.gcno core.* strace-*
+	$(RM) *.o driller.a $(progs) *.gcov *.gcda *.gcno core.* strace-* $(deps)
 
 check: $(progs)
 	set -x; \
 	for p in $(progs); do \
-		bash $$p.sh ; \
+		./$$p.sh ; \
 	done
 
 htags:
