@@ -1,9 +1,10 @@
 /*
  * map_cache.c
  *
- * Copyright (C) Jean-Marc Saffroy <saffroy@gmail.com> 2007
- * This program is free software, distributed under the terms of the
- * GNU General Public License version 2.
+ * Copyright 2007 Jean-Marc Saffroy <saffroy@gmail.com>
+ * This file is part of the Driller library.
+ * Driller is free software, distributed under the terms of the
+ * GNU Lesser General Public License version 2.1.
  *
  * map, unmap and keep track of memory maps to foreign processes,
  * avoiding the overhead of additional system calls when the same map
