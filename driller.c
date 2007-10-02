@@ -317,7 +317,7 @@ static void map_overload_stack(void) {
 }
 
 /*
- * return the page offset of the current stack pointer
+ * return the page address of the current stack pointer
  */
 static inline void *stack_base(void) {
         uintptr_t sp;
@@ -695,15 +695,15 @@ do_remap:
 		map->end = map->start + new_size;
 	else {
 		/* need to reinsert map to keep the map tree sorted */
-		void *rc;
+		void *rc2;
 
 		driller_malloc_install();
-		rc = tdelete(map, &map_root, map_cmp);
-		assert(rc != NULL);
+		rc2 = tdelete(map, &map_root, map_cmp);
+		assert(rc2 != NULL);
 		map->start = rc;
 		map->end = map->start + new_size;
-		rc = tsearch((void *)map, &map_root, map_cmp);
-		assert(rc != NULL);
+		rc2 = tsearch((void *)map, &map_root, map_cmp);
+		assert(rc2 != NULL);
 		driller_malloc_restore();
 	}
 
