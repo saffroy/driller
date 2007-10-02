@@ -14,7 +14,7 @@ LDFLAGS := $(GCOV_FLAGS)
 
 progs := test_mmpi test_fdproxy test_driller test_dlmalloc test_spinlock
 libobjs := fdproxy.o driller.o dlmalloc.o map_cache.o
-objs := $(progs:%=%.o) $(libobjs)
+objs := $(progs:%=%.o) mmpi.o $(libobjs)
 deps := $(objs:%.o=%.d)
 
 all: $(progs)
