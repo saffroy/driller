@@ -4,7 +4,7 @@ The Driller lib
 The set of files in this tarball implement a way for a group of
 cooperating processes to directly access memory segments of one
 another. This can form the basis of a message passing system that
-avoids costly data copy, as is demonstrated with mmpi ("mini-MPI), a
+avoids costly data copy, as is demonstrated with mmpi ("mini-MPI"), a
 very simple API loosely inspired from MPI (it only has send, recv and
 barrier primitives).
 
@@ -99,7 +99,7 @@ The code uses the following tricks to achieve its goals:
 
 These tricks make it possible for a process to simply replace most of
 its memory segments by memory-mapped files. The file descriptors for
-al replaced regions can then be passed to cooperating process, which,
+all replaced regions can then be passed to cooperating process, which,
 after an mmap(), can directly access the same memory. When the first
 process modifies or destroys its mapping, this is notified to other
 processes, which will drop any reference to the file and eventually
