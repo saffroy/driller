@@ -27,18 +27,16 @@ all: $(progs)
 driller.a: $(libobjs)
 	$(AR) r $@ $^
 
-test_mmpi: test_mmpi.o mmpi.o driller.a
-test_fdproxy: test_fdproxy.o mmpi.o driller.a
-test_driller: test_driller.o driller.a
-test_dlmalloc: test_dlmalloc.o dlmalloc.o
-test_spinlock: test_spinlock.o
+test_mmpi test_fdproxy: mmpi.o
+test_dlmalloc: dlmalloc.o
+
+test_driller test_mmpi test_fdproxy: driller.a
+test_driller test_mmpi test_fdproxy: LDLIBS += -ldl
 
 test_%.o: CPPFLAGS += -U NDEBUG
 test_dlmalloc.o: CPPFLAGS += -D NODRILL
 dlmalloc.o: CPPFLAGS += -D DEFAULT_GRANULARITY='((size_t)1U<<20)'
 dlmalloc.o driller.o: CPPFLAGS += -D MSPACES
-
-test_driller test_mmpi test_fdproxy: LDFLAGS += -ldl
 
 test_dlmalloc.c:
 	ln -s test_driller.c $@

@@ -173,7 +173,7 @@ static void map_record(void *start, void *end, int prot, off_t offset,
 		return;
 #if __i386__
 	if(start == (void*)0xffffe000)
-		/* not sure what it is: gate page? */
+		/* ignore gate page */
 		return;
 #endif
 	if(!(prot & PROT_READ))
@@ -181,7 +181,9 @@ static void map_record(void *start, void *end, int prot, off_t offset,
 		return;
 #ifdef DONT_MAP_TEXT
 	if(prot & PROT_EXEC)
-		/* prefer to keep text as is, for profiling */
+		/* prefer to keep text as is, otherwise oprofile can't get
+		 * symbol information
+		 * a side effect is that rodata may not be shared */
 		return;
 #endif
 	if(strncmp(path, "/dev/", strlen("/dev/")) == 0)
