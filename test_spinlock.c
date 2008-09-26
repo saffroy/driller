@@ -53,7 +53,7 @@ int main(int argc, char **argv) {
 		_exit(0);
 
 	for(i = 0; i < bufsz; i++)
-		assert(buf[i] = 2 * LOOPS);
+		assert(buf[i] == 2 * LOOPS);
 
 	printf("SUCCESS! exiting\n");
 	return 0;
