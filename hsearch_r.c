@@ -22,6 +22,7 @@
 #include <string.h>
 
 #include <search.h>
+#include "search.h"
 
 /* [Aho,Sethi,Ullman] Compilers: Principles, Techniques and Tools, 1986
    [Knuth]            The Art of Computer Programming, part 3 (6.4)  */
@@ -94,7 +95,6 @@ hcreate_r (nel, htab)
   /* everything went alright */
   return 1;
 }
-libc_hidden_def (hcreate_r)
 
 
 /* After using the hash table it has to be destroyed. The used memory can
@@ -117,7 +117,6 @@ hdestroy_r (htab)
   /* the sign for an existing table is an value != NULL in htable */
   htab->table = NULL;
 }
-libc_hidden_def (hdestroy_r)
 
 
 /* This is the search function. It uses double hashing with open addressing.
@@ -226,4 +225,3 @@ hsearch_r (item, action, retval, htab)
   *retval = NULL;
   return 0;
 }
-libc_hidden_def (hsearch_r)
