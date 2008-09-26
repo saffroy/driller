@@ -20,6 +20,7 @@
 #include "fdproxy.h"
 #include "driller.h"
 #include "map_cache.h"
+#include "search.h"
 
 #define MAP_CACHE_HSIZE_INIT 32
 

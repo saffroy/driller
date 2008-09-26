@@ -11,21 +11,6 @@
 #ifndef MMPI_INTERNAL_H
 #define MMPI_INTERNAL_H
 
-#define CONNECT_TIMEOUT 5 /* seconds */
-#define USE_TMPFS 1
-#define CACHELINE_ALIGN 64
-
-#define MSG_PAYLOAD_SIZE_BYTES 4096
-#define MSG_POOL_SIZE 1024
-//#define MSG_DRILLER_SIZE_THRESHOLD (1<<11) /* 2kB */
-#define MSG_DRILLER_SIZE_THRESHOLD (0ULL)
-
-#if USE_TMPFS
-#define TMPDIR "/dev/shm"
-#else
-#define TMPDIR "/tmp"
-#endif
-
 /*
  * lists for shared mem
  */

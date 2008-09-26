@@ -111,7 +111,7 @@ int main(int argc, char**argv) {
 
 	/* test throughput */
 
-#if 1
+#if 1 && defined(linux)
 	/* increase the odds that buf is allocated with mmap
 	 * (it won't be if there is enough free space in the heap) */
 	mallopt(M_MMAP_THRESHOLD, THRTEST_MAX_CHUNK_SIZE);

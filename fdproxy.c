@@ -20,6 +20,7 @@
 #include <search.h>
 
 #include "log.h"
+#include "tunables.h"
 #include "fdproxy.h"
 #include "fdproxy_internal.h"
 
@@ -426,8 +427,13 @@ void fdproxy_client_invalidate_fd(struct fdkey *key) {
 static void fdproxy_init_addr(struct sockaddr_un *addr) {
 	memset(addr, 0, sizeof(*addr));
 	addr->sun_family = AF_UNIX;
+#ifdef linux
 	snprintf(&addr->sun_path[1], sizeof(addr->sun_path)-1,
 		 "fdproxy-%d", fdproxy_id);
+#else
+	snprintf(addr->sun_path, sizeof(addr->sun_path),
+		 "%s/fdproxy-%d", TMPDIR, fdproxy_id);
+#endif
 }
 
 /*
@@ -445,6 +451,9 @@ static void fdproxy_daemon(void) {
 	/* bind socket, listen */
 	server_sock = socket(PF_UNIX, SOCK_STREAM, 0);
 	fdproxy_init_addr(&addr);
+#ifndef linux
+	unlink(addr.sun_path);
+#endif
 	if(bind(server_sock, (struct sockaddr *) &addr, sizeof(addr)))
 		perr("bind");
 	if(listen(server_sock, 5))
@@ -539,7 +548,7 @@ void fdproxy_init(int proxy_id, int do_fork) {
 		rc = connect(client_sock, (struct sockaddr *) &addr, sizeof(addr));
 		if(rc == 0)
 			break;
-		if(errno != ECONNREFUSED)
+		if(errno != ECONNREFUSED && errno != ENOENT)
 			perr("connect");
 		sleep(1);
 	}

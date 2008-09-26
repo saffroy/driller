@@ -11,10 +11,6 @@
 #ifndef FDPROXY_INTERNAL_H
 #define FDPROXY_INTERNAL_H
 
-#define FDPROXY_MAX_CLIENTS 32
-#define CONNECT_TIMEOUT 5 /* seconds */
-#define FDTABLE_HSIZE_INIT 32
-
 #define FDKEY_WELLKNOWN ((pid_t)0xf00a5a5)
 
 /*

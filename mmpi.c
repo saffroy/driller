@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <assert.h>
 
+#include "tunables.h"
 #include "mmpi.h"
 #include "log.h"
 #include "fdproxy.h"

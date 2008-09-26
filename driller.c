@@ -23,6 +23,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 
+#include "tunables.h"
 #include "driller.h"
 #include "driller_internal.h"
 #include "log.h"
@@ -43,8 +44,10 @@ static unsigned int page_size;
 static void *(*old_mmap)(void *start, size_t length, int prot, int flags,
 			 int fd, off_t offset);
 static int (*old_munmap)(void *start, size_t length);
+#ifdef linux
 static void *(*old_mremap)(void *old_address, size_t old_size,
 			   size_t new_size, int flags);
+#endif
 static int (*old_brk)(void *end_data_segment);
 static void *(*old_sbrk)(intptr_t increment);
 
@@ -64,19 +67,23 @@ static void (*map_invalidate_cb)(struct map_rec *map);
  * let's define our own allocation space, and use malloc hooks
  */
 static mspace driller_mspace;
+#ifdef linux
 static void *(*old_malloc_hook)(size_t bytes, const void *caller);
 static void (*old_free_hook)(void *mem, const void *caller);
 static void *(*old_realloc_hook)(void *mem, size_t bytes, const void *caller);
 static void *(*old_memalign_hook)(size_t align, size_t bytes, const void *caller);
+#endif
 
 /*
  * including both malloc.h and dlmalloc.h is not possible, 
  * so duplicate the following hook declarations
  */
+#ifdef linux
 extern void *(*__malloc_hook)(size_t bytes, const void *caller);
 extern void (*__free_hook)(void *mem, const void *caller);
 extern void *(*__realloc_hook)(void *mem, size_t bytes, const void *caller);
 extern void *(*__memalign_hook)(size_t align, size_t bytes, const void *caller);
+#endif /* linux */
 
 /******************/
 
@@ -97,6 +104,7 @@ static inline void *driller_realloc(void *mem, size_t bytes) {
 	return mspace_realloc(driller_mspace, mem, bytes);
 }
 
+#ifdef linux
 static void *driller_malloc_hook(size_t bytes, const void *caller) {
 	return driller_malloc(bytes);
 }
@@ -112,11 +120,41 @@ static void *driller_realloc_hook(void *mem, size_t bytes, const void *caller) {
 static void *driller_memalign_hook(size_t align, size_t bytes, const void *caller) {
 	return mspace_memalign(driller_mspace, align, bytes);
 }
+#else
+void *malloc(size_t bytes) {
+	if(driller_malloc_installed)
+		return mspace_malloc(driller_mspace, bytes);
+	else
+		return dlmalloc(bytes);
+}
+
+void free(void *mem) {
+	if(driller_malloc_installed)
+		mspace_free(driller_mspace, mem);
+	else
+		dlfree(mem);
+}
+
+void *realloc(void *mem, size_t bytes) {
+	if(driller_malloc_installed)
+		return mspace_realloc(driller_mspace, mem, bytes);
+	else
+		return dlrealloc(mem, bytes);
+}
+
+void *memalign(size_t align, size_t bytes) {
+	if(driller_malloc_installed)
+		return mspace_memalign(driller_mspace, align, bytes);
+	else
+		return dlmemalign(align, bytes);
+}
+#endif
 
 static void driller_malloc_install(void){
 	if(!driller_initialized || driller_malloc_installed)
 		return;
 
+#ifdef linux
 	old_malloc_hook = __malloc_hook;
 	old_free_hook = __free_hook;
 	old_realloc_hook = __realloc_hook;
@@ -126,6 +164,7 @@ static void driller_malloc_install(void){
 	__free_hook = driller_free_hook;
 	__realloc_hook = driller_realloc_hook;
 	__memalign_hook = driller_memalign_hook;
+#endif
 
 	driller_malloc_installed = 1;
 }
@@ -134,10 +173,12 @@ static void driller_malloc_restore(void){
 	if(!driller_initialized)
 		return;
 
+#ifdef linux
 	__malloc_hook = old_malloc_hook;
 	__free_hook = old_free_hook;
 	__realloc_hook = old_realloc_hook;
 	__memalign_hook = old_memalign_hook;
+#endif
 
 	driller_malloc_installed = 0;
 }
@@ -163,8 +204,8 @@ static int map_cmp(const void *a, const void *b) {
  * record a description of a memory segment that is/will become
  * a file-backed memory mapping - uses tsearch(3)
  */
-static void map_record(void *start, void *end, int prot, off_t offset,
-		       char *path, int fd) {
+void map_record(void *start, void *end, int prot, off_t offset,
+		char *path, int fd) {
 	struct map_rec *map;
 	void *rc;
 
@@ -180,7 +221,7 @@ static void map_record(void *start, void *end, int prot, off_t offset,
 		/* not readable, ignore */
 		return;
 #ifdef DONT_MAP_TEXT
-	if(prot & PROT_EXEC)
+	if((prot & PROT_EXEC) && !(prot & PROT_WRITE))
 		/* prefer to keep text as is, otherwise oprofile can't get
 		 * symbol information
 		 * a side effect is that rodata may not be shared */
@@ -214,66 +255,6 @@ static void map_record(void *start, void *end, int prot, off_t offset,
 }
 
 /*
- * parse and record the content of /proc/self/maps
- */
-static void map_parse(void)
-{
-	const char *file = "/proc/self/maps";
-	int fd;
-	char buf[4096] = {};
-	uintmax_t start, end, offset;
-	char prot_str[5];
-	long maj, min, ino;
-	char *line, *p;
-	int lineno, i;
-	int prot;
-
-	/* no allocation while we read maps, otherwise map_rebuild might
-	   try to map a segment that is gone (or has shrinked) */
-	fd = open(file, O_RDONLY);
-	if(fd < 0)
-		perr("open");
-	if(read(fd, buf, sizeof(buf)) < 0)
-		perr("read");
-	/* make sure we've read the whole thing */
-	if(read(fd, buf, sizeof(buf)) != 0)
-		err("could not read %s entirely", file);
-	if(close(fd) != 0)
-		perr("close");
-
-	line = buf;
-	for(lineno = 0; ; lineno++) {
-		if(sscanf(line, "%jx-%jx %s %jx %lx:%lx %ld", 
-			  &start, &end, prot_str, &offset,
-			  &maj, &min, &ino) != 7) {
-			p = strchrnul(line, '\n');
-			*p = '\0';
-			err("could not parse line %d: '%s'\n",
-			    lineno, line);
-		}
-
-		p = line;
-		for(i = 0; i < 5; i++)
-			p = strchr(p+1, ' ');
-		while(*p == ' ')
-			p++;
-		line = strchrnul(p, '\n');
-		*line++ = '\0'; /* remove trailing \n */
-		dbg("% 2d: %jx-%jx %s %jx %lx:%lx %ld '%s'\n",
-		    lineno, start, end, prot_str, offset, maj, min, ino, p);
-		prot = ((prot_str[0] == 'r') ? PROT_READ : 0)
-			| ((prot_str[1] == 'w') ? PROT_WRITE : 0)
-			| ((prot_str[2] == 'x') ? PROT_EXEC : 0);
-		if(prot_str[3] == 'p') /* private mapping */
-			map_record((void*)(uintptr_t)start,
-				   (void*)(uintptr_t)end,
-				   prot, offset, p, -1);
-		if(*line == '\0')
-			return;
-	}
-}
-
-/*
  * remplace any mapping (or the heap) with a file-backed mapping
  */
 static void map_overload(void *start, size_t length, int prot, int flags,
@@ -288,6 +269,17 @@ static void map_overload(void *start, size_t length, int prot, int flags,
 	shmem = mmap(start, length, prot, flags, fd, offset);
 	if(shmem == MAP_FAILED)
 		perr("mmap");
+}
+
+/*
+ * create a guard zone below the stack (mapped area with no access rights)
+ * this is required on some platforms to detect (and handle) stack growth
+ */
+static void stack_guard_map(void) {
+#ifndef linux
+	mmap(map_stack->start - STACK_GUARD_SIZE, STACK_GUARD_SIZE, 0,
+	     MAP_PRIVATE | MAP_FIXED, map_stack->fd, 0);
+#endif
 }
 
 /*
@@ -315,6 +307,8 @@ static void map_overload_stack(void) {
 	map_overload(map_stack->start, size, map_stack->prot,
 		     MAP_SHARED | MAP_FIXED, map_stack->fd,
 		     map_stack->offset, 0);
+	stack_guard_map();
+
 	dbg("remapped stack at %p", map_stack->start);
 }
 
@@ -329,6 +323,8 @@ static inline void *stack_base(void) {
 	asm volatile ("movq %%rsp,%0" : "=r"(sp));
 #elif __i386__
 	asm volatile ("movl %%esp,%0" : "=r"(sp));
+#elif __sparc__
+	asm volatile ("mov %%sp,%0" : "=r"(sp));
 #else
 #error function stack_base needs porting to your architecture!
 #endif
@@ -363,10 +359,22 @@ static void segv_sigaction(int signum, siginfo_t *si, void *uctx) {
 	int errno_sav = errno;
 
 	/* we handle stack growth and nothing else */
-	if(si->si_code != SEGV_MAPERR
-	   || addr >= map_stack->start
-	   || addr < (map_stack->end - STACK_MAP_OFFSET))
+	switch(si->si_code) {
+	case SEGV_MAPERR:
+		if(addr >= map_stack->start
+		   || addr < (map_stack->end - STACK_MAP_OFFSET))
+			goto out_raise;
+		break;
+#ifndef linux
+	case SEGV_ACCERR:
+		if(addr >= map_stack->start
+		   || addr < (map_stack->start - STACK_GUARD_SIZE))
+			goto out_raise;
+		break;
+#endif
+	default:
 		goto out_raise;
+	}
 
 	/* grow stack by at least STACK_MIN_GROW */
 	addr = (void*)((uintptr_t)addr & ~((unsigned long)page_size - 1));
@@ -386,6 +394,8 @@ static void segv_sigaction(int signum, siginfo_t *si, void *uctx) {
 		  map_stack->offset);
 	if(rc == MAP_FAILED)
 		perr("mmap");
+	stack_guard_map();
+
 	dbg("stack grows to %p", map_stack->start);
 	errno = errno_sav;
 	return;
@@ -428,6 +438,31 @@ static int map_create_fd(char *fmt, ...) {
 	return fd;
 }
 
+static int map_is_stack(struct map_rec *map) {
+#ifdef linux
+	return (strcmp(map->path, "[stack]") == 0);
+#else
+	void *p;
+
+	p = stack_base();
+	return (p >= map->start) && (p < map->end);
+#endif
+}
+
+static int map_is_heap(struct map_rec *map) {
+#ifdef linux
+	return (strcmp(map->path, "[heap]") == 0);
+#else
+	void *buf;
+	int rc;
+
+	buf = malloc(1);
+	rc = (buf >= map->start) && (buf < map->end);
+	free(buf);
+	return rc;
+#endif
+}
+
 /*
  * replace a memory segment by a file-backed memory mapping
  */
@@ -439,9 +474,9 @@ static void map_rebuild(struct map_rec *map, int index) {
 	struct sigaction sa;
 
 	dbg("rebuild %d: %p %s", index, map->start, map->path);
-	if(strcmp(map->path, "[heap]") == 0)
+	if(map_is_heap(map))
 		type = OVERLOAD_HEAP;
-	else if(strcmp(map->path, "[stack]") == 0)
+	else if(map_is_stack(map))
 		type = OVERLOAD_STACK;
 	else
 		type = OVERLOAD_REG;
@@ -643,9 +678,44 @@ out_ret:
 	return rc;
 }
 
+#ifndef linux
+/*
+ * minimalist replacement for mremap
+ * should only be used to manage the heap (brk/sbrk)
+ */
+static void * driller_mremap(struct map_rec *map,
+			     size_t new_size) {
+	size_t old_size = map->end - map->start;
+	void *rc;
+
+	if(new_size > old_size) {
+		rc = old_mmap(map->start + old_size, new_size - old_size,
+			      map->prot, MAP_SHARED | MAP_FIXED,
+			      map->fd, map->offset + old_size);
+		if(rc != MAP_FAILED)
+			rc = map->start;
+	} else {
+		if(old_munmap(map->start + new_size, old_size - new_size))
+			rc = MAP_FAILED;
+		else
+			rc = map->start;
+	}
+	dbg("driller_mremap(address=%p, old_size=%d, new_size=%d) = %p (%s)",
+	    map->start, old_size, new_size, rc, strerror(errno));
+	return rc;
+}
+#endif
+
 /*
  * overload the regular mremap
  */
+#ifndef __GLIBC_PREREQ
+#define __GLIBC_PREREQ(x,y) 0
+#endif
+
+#ifndef linux
+static
+#endif
 #if __GLIBC_PREREQ(2,4)
 void * mremap(void *old_address, size_t old_size ,
 	      size_t new_size, int flags, ...) {
@@ -658,14 +728,23 @@ void * mremap(void *old_address, size_t old_size ,
 	struct map_rec key;
 	struct map_rec *map, **mptr;
 
+#ifdef linux
 	if(!driller_initialized || driller_malloc_installed) {
 		rc = old_mremap(old_address, old_size, new_size, flags);
 		errno_sav = errno;
 		goto out;
 	}
+#else
+	assert(driller_initialized);
+	assert(driller_malloc_installed);
+#endif
 
 	/* flags other than MAYMOVE are not handled yet (extra arg) */
+#ifdef linux
 	assert((flags & ~MREMAP_MAYMOVE) == 0);
+#else
+	assert(flags == 0);
+#endif
 
 	/* identify affected mapping */
 	key.start = old_address;
@@ -682,7 +761,11 @@ void * mremap(void *old_address, size_t old_size ,
 	assert(map->end == key.end);
 
 do_remap:
+#ifdef linux
 	rc = old_mremap(old_address, old_size, new_size, flags);
+#else
+	rc = driller_mremap(map, new_size);
+#endif
 	errno_sav = errno;
 	if(rc == MAP_FAILED || map == NULL)
 		goto out;
@@ -795,7 +878,9 @@ static void driller_init_syms(void) {
 	/* locate overloaded functions */
 	old_mmap = get_sym("mmap");
 	old_munmap = get_sym("munmap");
+#ifdef linux
 	old_mremap = get_sym("mremap");
+#endif
 	old_brk = get_sym("brk");
 	old_sbrk = get_sym("sbrk");
 }
