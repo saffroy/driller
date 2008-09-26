@@ -34,6 +34,8 @@
 
 #define perr(str) err(str ":%s\n", strerror(errno))
 
+#define perr_noabort(str) err_noabort(str ":%s\n", strerror(errno))
+
 #define warn(fmt,arg...) \
 	fprintf(stderr, "warning(%s:%d:%s): " fmt "\n",		\
 		__FILE__, __LINE__, __FUNCTION__, ##arg)
