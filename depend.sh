@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # usage: CC=... ./depend.sh <foo/bar.d> [flags] <foo/bar.c>
 #set -x
