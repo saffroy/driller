@@ -45,6 +45,12 @@ static inline int spin_trylock(struct spinlock *lock) {
 		: "=r" (oldval), "=m" (lock->lck)
 		: "0" (0), "m" (lock->lck)
 		: "memory");
+#elif __sparc__
+	asm volatile(
+		"swap %1,%0"
+		: "=r" (oldval), "=m" (lock->lck)
+		: "0" (0), "m" (lock->lck)
+		: "memory");
 #else
 #error function spin_trylock needs porting to your architecture!
 #endif
@@ -56,6 +62,8 @@ static inline void nop(void) {
 	sched_yield();
 #elif __x86_64__ || __i386__
 	asm volatile("rep; nop" : : ); // XXX not sure it's a pause on x64
+#elif __sparc__
+	asm volatile("nop" : : ); // XXX not sure AT ALL it's a pause on sparc
 #else
 	/* nop */
 #endif
@@ -68,11 +76,20 @@ static inline void spin_lock(struct spinlock *lock) {
 }
 
 static inline void spin_unlock(struct spinlock *lock) {
+#ifdef __sparc__
+	int one = 1;
+#endif
+
 	assert(lock->magic == LOCK_MAGIC);
 #if __x86_64__ || __i386__ 
 	asm volatile("movl $1,%0"
 		     :"=m" (lock->lck)
 		     :
+		     : "memory");
+#elif __sparc__
+	asm volatile("st %1,%0"
+		     :"=m" (lock->lck), "=r" (one)
+		     :"m" (lock->lck), "r" (one)
 		     : "memory");
 #else
 #error function spin_unlock needs porting to your architecture!
