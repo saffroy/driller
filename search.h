@@ -20,6 +20,7 @@
 #ifndef _MY_SEARCH_H
 #define	_MY_SEARCH_H 1
 
+#ifndef linux
 #define __USE_GNU
 #define __set_errno(_v) (errno = _v)
 #define __THROW
@@ -61,5 +62,6 @@ extern int hcreate_r (size_t __nel, struct hsearch_data *__htab) __THROW;
 extern void hdestroy_r (struct hsearch_data *__htab) __THROW;
 #endif
 
+#endif /* !linux */
 
 #endif /* search.h */
